@@ -26,7 +26,7 @@
             <h2>Admin Panel</h2>
             <a href="/admin/dashboard">Dashboard</a>
             <a href="#">Manage Departments</a>
-            <a href="#">Manage Faculty</a>
+            <a href="/admin/faculties">Manage Faculty</a>
             <a href="#">Manage Subjects</a>
             <a href="#">Manage Classrooms</a>
             <a href="#">Notification Management</a>

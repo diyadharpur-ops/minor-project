@@ -1,9 +1,13 @@
 <?php
 
+use App\Models\Department;
+use App\Models\Faculty;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 Route::get('/', function () {
     return view('home');
@@ -30,7 +34,7 @@ Route::post('/admin/login', function (Request $request) {
 });
 
 Route::get('/admin/dashboard', function () {
-    if (!session('admin.auth')) {
+    if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
@@ -38,7 +42,7 @@ Route::get('/admin/dashboard', function () {
 });
 
 Route::get('/admin/profile', function () {
-    if (!session('admin.auth')) {
+    if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
@@ -47,25 +51,25 @@ Route::get('/admin/profile', function () {
 
 // Departments management
 Route::get('/admin/departments', function (Request $request) {
-    if (!session('admin.auth')) {
+    if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
     $q = $request->input('q');
     if ($q) {
-        $departments = \App\Models\Department::where('name', 'like', "%{$q}%")
+        $departments = Department::where('name', 'like', "%{$q}%")
             ->orWhere('code', 'like', "%{$q}%")
             ->orderBy('created_at', 'desc')
             ->get();
     } else {
-        $departments = \App\Models\Department::orderBy('created_at', 'desc')->get();
+        $departments = Department::orderBy('created_at', 'desc')->get();
     }
 
     return view('admin.departments.index', ['departments' => $departments, 'q' => $q]);
 });
 
 Route::get('/admin/departments/create', function () {
-    if (!session('admin.auth')) {
+    if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
@@ -73,7 +77,7 @@ Route::get('/admin/departments/create', function () {
 });
 
 Route::post('/admin/departments', function (Request $request) {
-    if (!session('admin.auth')) {
+    if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
@@ -83,22 +87,23 @@ Route::post('/admin/departments', function (Request $request) {
         'description' => 'nullable|string',
     ]);
 
-    \App\Models\Department::create($data);
+    Department::create($data);
 
     return redirect('/admin/departments');
 });
 
 Route::get('/admin/departments/{id}/edit', function ($id) {
-    if (!session('admin.auth')) {
+    if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
-    $dept = \App\Models\Department::findOrFail($id);
+    $dept = Department::findOrFail($id);
+
     return view('admin.departments.edit', ['dept' => $dept]);
 });
 
 Route::post('/admin/departments/{id}', function (Request $request, $id) {
-    if (!session('admin.auth')) {
+    if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
@@ -108,23 +113,148 @@ Route::post('/admin/departments/{id}', function (Request $request, $id) {
         'description' => 'nullable|string',
     ]);
 
-    $dept = \App\Models\Department::findOrFail($id);
+    $dept = Department::findOrFail($id);
     $dept->update($data);
 
     return redirect('/admin/departments');
 });
 
 Route::post('/admin/departments/{id}/delete', function ($id) {
-    if (!session('admin.auth')) {
+    if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
-    $dept = \App\Models\Department::find($id);
+    $dept = Department::find($id);
     if ($dept) {
         $dept->delete();
     }
 
     return redirect('/admin/departments');
+});
+
+Route::get('/admin/faculties', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $q = $request->input('q');
+    $query = Faculty::query()->with('department');
+
+    if ($q) {
+        $query->where('name', 'like', "%{$q}%")
+            ->orWhere('email', 'like', "%{$q}%")
+            ->orWhere('qualification', 'like', "%{$q}%");
+    }
+
+    $faculties = $query->orderBy('created_at', 'desc')->get();
+
+    return view('admin.faculties.index', ['faculties' => $faculties, 'q' => $q]);
+});
+
+Route::get('/admin/faculties/create', function () {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    return view('admin.faculties.create', ['departments' => Department::orderBy('name')->get()]);
+});
+
+Route::post('/admin/faculties', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $data = $request->validate([
+        'name' => 'required|string|max:255',
+        'mobile_number' => 'required|string|max:20',
+        'email' => 'required|email|max:255|unique:faculties,email',
+        'qualification' => 'required|string|max:255',
+        'department_id' => 'required|exists:departments,id',
+        'subjects' => 'nullable|string|max:1000',
+    ]);
+
+    $faculty = Faculty::create($data);
+
+    if ($department = Department::find($data['department_id'])) {
+        $folder = 'faculty-records/'.Str::slug($department->name);
+        Storage::disk('local')->makeDirectory($folder);
+        $filePath = $folder.'/faculty-'.$faculty->id.'.json';
+        Storage::disk('local')->put($filePath, json_encode([
+            'id' => $faculty->id,
+            'name' => $faculty->name,
+            'mobile_number' => $faculty->mobile_number,
+            'email' => $faculty->email,
+            'qualification' => $faculty->qualification,
+            'department' => $department->name,
+            'subjects' => $faculty->subjects,
+        ], JSON_PRETTY_PRINT));
+        $faculty->update(['folder_path' => $filePath]);
+    }
+
+    return redirect('/admin/faculties');
+});
+
+Route::get('/admin/faculties/{id}/edit', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $faculty = Faculty::findOrFail($id);
+
+    return view('admin.faculties.edit', ['faculty' => $faculty, 'departments' => Department::orderBy('name')->get()]);
+});
+
+Route::post('/admin/faculties/{id}', function (Request $request, $id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $faculty = Faculty::findOrFail($id);
+
+    $data = $request->validate([
+        'name' => 'required|string|max:255',
+        'mobile_number' => 'required|string|max:20',
+        'email' => 'required|email|max:255|unique:faculties,email,'.$faculty->id,
+        'qualification' => 'required|string|max:255',
+        'department_id' => 'required|exists:departments,id',
+        'subjects' => 'nullable|string|max:1000',
+    ]);
+
+    $faculty->update($data);
+
+    if ($department = Department::find($data['department_id'])) {
+        $folder = 'faculty-records/'.Str::slug($department->name);
+        Storage::disk('local')->makeDirectory($folder);
+        $filePath = $folder.'/faculty-'.$faculty->id.'.json';
+        Storage::disk('local')->put($filePath, json_encode([
+            'id' => $faculty->id,
+            'name' => $faculty->name,
+            'mobile_number' => $faculty->mobile_number,
+            'email' => $faculty->email,
+            'qualification' => $faculty->qualification,
+            'department' => $department->name,
+            'subjects' => $faculty->subjects,
+        ], JSON_PRETTY_PRINT));
+        $faculty->update(['folder_path' => $filePath]);
+    }
+
+    return redirect('/admin/faculties');
+});
+
+Route::post('/admin/faculties/{id}/delete', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $faculty = Faculty::find($id);
+    if ($faculty) {
+        if ($faculty->folder_path) {
+            Storage::disk('local')->delete($faculty->folder_path);
+        }
+        $faculty->delete();
+    }
+
+    return redirect('/admin/faculties');
 });
 
 Route::post('/admin/logout', function () {
