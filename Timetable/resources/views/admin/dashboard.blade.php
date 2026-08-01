@@ -51,7 +51,7 @@
                 <div class="card">
                     <h3>Manage Departments</h3>
                     <p>Create and update department records.</p>
-                    <a href="#" class="btn">Open</a>
+                    <a href="/admin/departments" class="btn">Open</a>
                 </div>
                 <div class="card">
                     <h3>Manage Faculty</h3>
