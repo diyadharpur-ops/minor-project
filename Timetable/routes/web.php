@@ -2,6 +2,7 @@
 
 use App\Models\Department;
 use App\Models\Faculty;
+use App\Models\Notification;
 use App\Models\Subject;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -48,6 +49,33 @@ Route::get('/admin/profile', function () {
     }
 
     return view('admin.profile');
+});
+
+Route::get('/admin/notifications', function () {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $notifications = Notification::orderBy('created_at', 'desc')->get();
+
+    return view('admin.notifications.index', ['notifications' => $notifications]);
+});
+
+Route::post('/admin/notifications', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $data = $request->validate([
+        'title' => 'required|string|max:255',
+        'type' => 'required|string|max:100',
+        'message' => 'required|string',
+        'audience' => 'required|string|in:student,faculty,all',
+    ]);
+
+    Notification::create($data);
+
+    return redirect('/admin/notifications');
 });
 
 // Departments management
@@ -477,7 +505,11 @@ Route::middleware(['web'])->group(function () {
             return redirect('/')->with('error', 'Please login to continue.');
         }
 
-        return view('student.notifications');
+        $notifications = Notification::whereIn('audience', ['student', 'all'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return view('student.notifications', ['notifications' => $notifications]);
     });
 
     Route::get('/student/profile/edit', function () {

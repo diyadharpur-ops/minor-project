@@ -29,7 +29,7 @@
             <a href="/admin/faculties">Manage Faculty</a>
             <a href="/admin/subjects">Manage Subjects</a>
             <a href="#">Manage Classrooms</a>
-            <a href="#">Notification Management</a>
+            <a href="/admin/notifications">Notification Management</a>
             <a href="#">Reports</a>
             <a href="#">Generate Timetable</a>
             <a href="/admin/profile">Admin Profile</a>

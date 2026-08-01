@@ -5,9 +5,15 @@
         <h2>Receive Notifications</h2>
         <p class="section-intro">Latest announcements for your student account.</p>
         <div class="list-card">
-            <div style="margin-bottom: 14px;"><strong>Timetable released</strong><br><span style="color:#4e607f;">Your updated class timetable is now available.</span></div>
-            <div style="margin-bottom: 14px;"><strong>Exam schedule update</strong><br><span style="color:#4e607f;">Please check the notice board for exam dates.</span></div>
-            <div style="margin-bottom: 14px;"><strong>Profile reminder</strong><br><span style="color:#4e607f;">Make sure your profile information is correct.</span></div>
+            @forelse($notifications as $notification)
+                <div style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid rgba(15, 61, 94, 0.1);">
+                    <strong>{{ $notification->title }}</strong><br>
+                    <span style="color:#4e607f;">{{ $notification->message }}</span><br>
+                    <small style="color:#6b7280;">{{ $notification->type }} • {{ $notification->created_at->format('M d, Y') }}</small>
+                </div>
+            @empty
+                <p>No notifications available right now.</p>
+            @endforelse
         </div>
     </div>
 @endsection
