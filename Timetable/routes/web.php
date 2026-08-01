@@ -2,6 +2,7 @@
 
 use App\Models\Department;
 use App\Models\Faculty;
+use App\Models\Subject;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -255,6 +256,137 @@ Route::post('/admin/faculties/{id}/delete', function ($id) {
     }
 
     return redirect('/admin/faculties');
+});
+
+Route::get('/admin/subjects', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $q = $request->input('q');
+    $query = Subject::query()->with('department');
+
+    if ($q) {
+        $query->where('name', 'like', "%{$q}%")
+            ->orWhere('subject_code', 'like', "%{$q}%")
+            ->orWhere('semester', 'like', "%{$q}%")
+            ->orWhere('faculty_name', 'like', "%{$q}%");
+    }
+
+    $subjects = $query->orderBy('created_at', 'desc')->get();
+
+    return view('admin.subjects.index', ['subjects' => $subjects, 'q' => $q]);
+});
+
+Route::get('/admin/subjects/create', function () {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    return view('admin.subjects.create', ['departments' => Department::orderBy('name')->get()]);
+});
+
+Route::post('/admin/subjects', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $data = $request->validate([
+        'name' => 'required|string|max:255',
+        'subject_code' => 'required|string|max:50|unique:subjects,subject_code',
+        'semester' => 'required|string|max:20',
+        'department_id' => 'required|exists:departments,id',
+        'credit' => 'nullable|integer|min:1|max:10',
+        'faculty_name' => 'nullable|string|max:255',
+    ]);
+
+    $subject = Subject::create($data);
+
+    if ($department = Department::find($data['department_id'])) {
+        $folder = 'subject-records/'.Str::slug($department->name).'/'.Str::slug((string) $subject->semester);
+        Storage::disk('local')->makeDirectory($folder);
+        $filePath = $folder.'/subject-'.$subject->id.'.json';
+        Storage::disk('local')->put($filePath, json_encode([
+            'id' => $subject->id,
+            'name' => $subject->name,
+            'subject_code' => $subject->subject_code,
+            'semester' => $subject->semester,
+            'department' => $department->name,
+            'credit' => $subject->credit,
+            'faculty_name' => $subject->faculty_name,
+        ], JSON_PRETTY_PRINT));
+        $subject->update(['folder_path' => $filePath]);
+    }
+
+    return redirect('/admin/subjects');
+});
+
+Route::get('/admin/subjects/{id}/edit', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $subject = Subject::findOrFail($id);
+
+    return view('admin.subjects.edit', ['subject' => $subject, 'departments' => Department::orderBy('name')->get()]);
+});
+
+Route::post('/admin/subjects/{id}', function (Request $request, $id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $subject = Subject::findOrFail($id);
+
+    $data = $request->validate([
+        'name' => 'required|string|max:255',
+        'subject_code' => 'required|string|max:50|unique:subjects,subject_code,'.$subject->id,
+        'semester' => 'required|string|max:20',
+        'department_id' => 'required|exists:departments,id',
+        'credit' => 'nullable|integer|min:1|max:10',
+        'faculty_name' => 'nullable|string|max:255',
+    ]);
+
+    $subject->update($data);
+
+    if ($department = Department::find($data['department_id'])) {
+        $folder = 'subject-records/'.Str::slug($department->name).'/'.Str::slug((string) $subject->semester);
+        Storage::disk('local')->makeDirectory($folder);
+        $filePath = $folder.'/subject-'.$subject->id.'.json';
+
+        if ($subject->folder_path && $subject->folder_path !== $filePath) {
+            Storage::disk('local')->delete($subject->folder_path);
+        }
+
+        Storage::disk('local')->put($filePath, json_encode([
+            'id' => $subject->id,
+            'name' => $subject->name,
+            'subject_code' => $subject->subject_code,
+            'semester' => $subject->semester,
+            'department' => $department->name,
+            'credit' => $subject->credit,
+            'faculty_name' => $subject->faculty_name,
+        ], JSON_PRETTY_PRINT));
+        $subject->update(['folder_path' => $filePath]);
+    }
+
+    return redirect('/admin/subjects');
+});
+
+Route::post('/admin/subjects/{id}/delete', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $subject = Subject::find($id);
+    if ($subject) {
+        if ($subject->folder_path) {
+            Storage::disk('local')->delete($subject->folder_path);
+        }
+        $subject->delete();
+    }
+
+    return redirect('/admin/subjects');
 });
 
 Route::post('/admin/logout', function () {

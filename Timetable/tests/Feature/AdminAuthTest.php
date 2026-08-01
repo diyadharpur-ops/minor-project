@@ -1,9 +1,8 @@
 <?php
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
 
-uses(TestCase::class, RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 describe('admin authentication', function () {
     it('allows the admin to login and reach the dashboard', function () {

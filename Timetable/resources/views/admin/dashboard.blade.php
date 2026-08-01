@@ -27,7 +27,7 @@
             <a href="/admin/dashboard">Dashboard</a>
             <a href="#">Manage Departments</a>
             <a href="/admin/faculties">Manage Faculty</a>
-            <a href="#">Manage Subjects</a>
+            <a href="/admin/subjects">Manage Subjects</a>
             <a href="#">Manage Classrooms</a>
             <a href="#">Notification Management</a>
             <a href="#">Reports</a>
@@ -56,12 +56,12 @@
                 <div class="card">
                     <h3>Manage Faculty</h3>
                     <p>Track faculty and their assignments.</p>
-                    <a href="#" class="btn">Open</a>
+                    <a href="/admin/faculties" class="btn">Open</a>
                 </div>
                 <div class="card">
                     <h3>Manage Subjects</h3>
                     <p>Organize subjects and curriculum details.</p>
-                    <a href="#" class="btn">Open</a>
+                    <a href="/admin/subjects" class="btn">Open</a>
                 </div>
                 <div class="card">
                     <h3>Manage Classrooms</h3>
