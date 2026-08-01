@@ -160,6 +160,16 @@
         </aside>
 
         <main class="content">
+            @if(session('status'))
+                <div style="margin-bottom: 18px; padding: 14px 16px; border-radius: 12px; background: #e6f9f2; color: #0a5a34; border: 1px solid #8ae3b8;">
+                    {{ session('status') }}
+                </div>
+            @endif
+            @if(session('error'))
+                <div style="margin-bottom: 18px; padding: 14px 16px; border-radius: 12px; background: #ffeced; color: #8b252d; border: 1px solid #f5a4a6;">
+                    {{ session('error') }}
+                </div>
+            @endif
             <section id="admin" class="card active">
                 <h2>Admin Login</h2>
                 <p>Enter your admin credentials to continue.</p>
@@ -200,14 +210,15 @@
             <section id="student-login" class="card">
                 <h2>Student Login</h2>
                 <p>Use your enrollment number and password to sign in.</p>
-                <form class="form-grid">
+                <form class="form-grid" action="/student/login" method="POST">
+                    @csrf
                     <div class="field">
                         <label for="student-enrollment">Student Enrollment Number</label>
-                        <input id="student-enrollment" type="text" placeholder="Enrollment Number">
+                        <input id="student-enrollment" name="enrollment_number" type="text" placeholder="Enrollment Number" value="{{ old('enrollment_number') }}" required>
                     </div>
                     <div class="field">
                         <label for="student-password">Password</label>
-                        <input id="student-password" type="password" placeholder="Enter password">
+                        <input id="student-password" name="password" type="password" placeholder="Enter password" required>
                     </div>
                     <div class="actions">
                         <button type="submit">Login</button>
@@ -218,30 +229,39 @@
             <section id="student-register" class="card">
                 <h2>Student Register</h2>
                 <p>Create a new student account with your details.</p>
-                <form class="form-grid">
+                <form class="form-grid" action="/student/register" method="POST">
+                    @csrf
                     <div class="field">
                         <label for="reg-enrollment">Student Enrollment Number</label>
-                        <input id="reg-enrollment" type="text" placeholder="Enrollment Number">
+                        <input id="reg-enrollment" name="enrollment_number" type="text" placeholder="Enrollment Number" value="{{ old('enrollment_number') }}" required>
                     </div>
                     <div class="field">
                         <label for="reg-name">Student Name</label>
-                        <input id="reg-name" type="text" placeholder="Student Name">
+                        <input id="reg-name" name="name" type="text" placeholder="Student Name" value="{{ old('name') }}" required>
                     </div>
                     <div class="field">
                         <label for="reg-department">Department</label>
-                        <input id="reg-department" type="text" placeholder="Department">
+                        <input id="reg-department" name="department" type="text" placeholder="Department" value="{{ old('department') }}">
                     </div>
                     <div class="field">
                         <label for="reg-semester">Semester</label>
-                        <input id="reg-semester" type="text" placeholder="Semester">
+                        <input id="reg-semester" name="semester" type="text" placeholder="Semester" value="{{ old('semester') }}">
                     </div>
                     <div class="field">
                         <label for="reg-class">Class</label>
-                        <input id="reg-class" type="text" placeholder="Class">
+                        <input id="reg-class" name="student_class" type="text" placeholder="Class" value="{{ old('student_class') }}">
                     </div>
                     <div class="field">
                         <label for="reg-divcon">DivCon</label>
-                        <input id="reg-divcon" type="text" placeholder="DivCon">
+                        <input id="reg-divcon" name="divcon" type="text" placeholder="DivCon" value="{{ old('divcon') }}">
+                    </div>
+                    <div class="field">
+                        <label for="reg-password">Password</label>
+                        <input id="reg-password" name="password" type="password" placeholder="Enter password" required>
+                    </div>
+                    <div class="field">
+                        <label for="reg-password-confirm">Confirm Password</label>
+                        <input id="reg-password-confirm" name="password_confirmation" type="password" placeholder="Confirm password" required>
                     </div>
                     <div class="actions">
                         <button type="submit">Register</button>
