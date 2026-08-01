@@ -163,14 +163,15 @@
             <section id="admin" class="card active">
                 <h2>Admin Login</h2>
                 <p>Enter your admin credentials to continue.</p>
-                <form class="form-grid">
+                <form class="form-grid" method="POST" action="/admin/login">
+                    @csrf
                     <div class="field">
                         <label for="admin-email">Admin Email</label>
-                        <input id="admin-email" type="email" placeholder="admin@example.com">
+                        <input id="admin-email" name="email" type="email" value="admin@example.com" placeholder="admin@example.com" required>
                     </div>
                     <div class="field">
                         <label for="admin-password">Password</label>
-                        <input id="admin-password" type="password" placeholder="Enter password">
+                        <input id="admin-password" name="password" type="password" value="admin" placeholder="Enter password" required>
                     </div>
                     <div class="actions">
                         <button type="submit">Login</button>
