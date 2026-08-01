@@ -28,7 +28,7 @@
             <a href="#">Manage Departments</a>
             <a href="/admin/faculties">Manage Faculty</a>
             <a href="/admin/subjects">Manage Subjects</a>
-            <a href="#">Manage Classrooms</a>
+            <a href="/admin/classrooms">Manage Classrooms</a>
             <a href="/admin/notifications">Notification Management</a>
             <a href="#">Reports</a>
             <a href="#">Generate Timetable</a>
@@ -66,7 +66,7 @@
                 <div class="card">
                     <h3>Manage Classrooms</h3>
                     <p>Control available classroom resources.</p>
-                    <a href="#" class="btn">Open</a>
+                    <a href="/admin/classrooms" class="btn">Open</a>
                 </div>
                 <div class="card">
                     <h3>Notification Management</h3>

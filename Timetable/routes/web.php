@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Classroom;
 use App\Models\Department;
 use App\Models\Faculty;
 use App\Models\Notification;
@@ -415,6 +416,93 @@ Route::post('/admin/subjects/{id}/delete', function ($id) {
     }
 
     return redirect('/admin/subjects');
+});
+
+// Classrooms management
+Route::get('/admin/classrooms', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $q = $request->input('q');
+    $query = Classroom::query();
+
+    if ($q) {
+        $query->where('room_number', 'like', "%{$q}%")
+            ->orWhere('room_type', 'like', "%{$q}%")
+            ->orWhere('availability', 'like', "%{$q}%");
+    }
+
+    $classrooms = $query->orderBy('created_at', 'desc')->get();
+
+    return view('admin.classrooms.index', ['classrooms' => $classrooms, 'q' => $q]);
+});
+
+Route::get('/admin/classrooms/create', function () {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    return view('admin.classrooms.create');
+});
+
+Route::post('/admin/classrooms', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $data = $request->validate([
+        'room_number' => 'required|string|max:50|unique:classrooms,room_number',
+        'room_capacity' => 'required|integer|min:1',
+        'room_type' => 'required|string|in:Classroom,Lab',
+        'availability' => 'required|string|in:Available,Booked,Maintenance',
+    ]);
+
+    Classroom::create($data);
+
+    return redirect('/admin/classrooms');
+});
+
+Route::get('/admin/classrooms/{id}/edit', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $classroom = Classroom::findOrFail($id);
+
+    return view('admin.classrooms.edit', ['classroom' => $classroom]);
+});
+
+Route::post('/admin/classrooms/{id}', function (Request $request, $id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $classroom = Classroom::findOrFail($id);
+
+    $data = $request->validate([
+        'room_number' => 'required|string|max:50|unique:classrooms,room_number,'.$classroom->id,
+        'room_capacity' => 'required|integer|min:1',
+        'room_type' => 'required|string|in:Classroom,Lab',
+        'availability' => 'required|string|in:Available,Booked,Maintenance',
+    ]);
+
+    $classroom->update($data);
+
+    return redirect('/admin/classrooms');
+});
+
+Route::post('/admin/classrooms/{id}/delete', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $classroom = Classroom::find($id);
+    if ($classroom) {
+        $classroom->delete();
+    }
+
+    return redirect('/admin/classrooms');
 });
 
 Route::post('/admin/logout', function () {
