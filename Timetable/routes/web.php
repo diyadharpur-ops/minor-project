@@ -6,6 +6,7 @@ use App\Models\Faculty;
 use App\Models\Notification;
 use App\Models\Subject;
 use App\Models\User;
+use App\Services\TimetableGenerator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
@@ -85,7 +86,14 @@ Route::get('/admin/timetable', function () {
         return redirect('/admin/login');
     }
 
-    return view('admin.timetable.index');
+    $semesters = Subject::select('semester')->distinct()->pluck('semester')->filter()->values();
+
+    return view('admin.timetable.index', [
+        'semesters' => $semesters,
+        'days' => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+        'timeSlots' => ['09:00-10:00', '10:00-11:00', '11:00-12:00', '01:00-02:00', '02:00-03:00'],
+        'timetable' => session('timetable'),
+    ]);
 });
 
 Route::post('/admin/timetable/generate', function (Request $request) {
@@ -93,9 +101,65 @@ Route::post('/admin/timetable/generate', function (Request $request) {
         return redirect('/admin/login');
     }
 
-    // Placeholder generator: create a small file to indicate generation time
+    $data = $request->validate([
+        'semester' => 'required|string',
+        'days' => 'nullable|string',
+        'time_slots' => 'nullable|string',
+    ]);
+
+    $days = array_values(array_filter(array_map('trim', preg_split('/\r\n|\n|,/', $data['days'] ?? ''))));
+    $timeSlots = array_values(array_filter(array_map('trim', preg_split('/\r\n|\n|,/', $data['time_slots'] ?? ''))));
+
+    if ($days === []) {
+        $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    }
+
+    if ($timeSlots === []) {
+        $timeSlots = ['09:00-10:00', '10:00-11:00', '11:00-12:00', '01:00-02:00', '02:00-03:00'];
+    }
+
+    $subjects = Subject::where('semester', $data['semester'])->get()->map(function ($subject) {
+        $type = Str::contains(Str::lower($subject->name), 'lab') ? 'lab' : 'theory';
+        $theoryHours = $subject->credit ?? 0;
+        $practicalHours = $type === 'lab' ? 2 : 0;
+
+        return [
+            'id' => $subject->id,
+            'name' => $subject->name,
+            'subject_code' => $subject->subject_code,
+            'semester' => $subject->semester,
+            'credit' => (int) ($subject->credit ?? 0),
+            'theory_hours' => $type === 'theory' ? $theoryHours : 0,
+            'practical_hours' => $practicalHours,
+            'faculty_name' => $subject->faculty_name,
+        ];
+    })->values()->all();
+
+    $faculties = Faculty::all()->map(function ($faculty) {
+        return [
+            'id' => $faculty->id,
+            'name' => $faculty->name,
+            'availability' => $faculty->designation ?? 'Available',
+            'subjects' => $faculty->subjects ? explode(',', $faculty->subjects) : [],
+        ];
+    })->values()->all();
+
+    $classrooms = Classroom::all()->map(function ($classroom) {
+        return [
+            'id' => $classroom->id,
+            'room_number' => $classroom->room_number,
+            'room_type' => $classroom->room_type,
+            'availability' => $classroom->availability,
+        ];
+    })->values()->all();
+
+    $generator = new TimetableGenerator();
+    $timetable = $generator->generate($data['semester'], $days, $timeSlots, $subjects, $faculties, $classrooms);
+
     $path = 'timetables/generated-'.now()->format('YmdHis').'.json';
-    Storage::disk('local')->put($path, json_encode(['generated_at' => now()->toDateTimeString()], JSON_PRETTY_PRINT));
+    Storage::disk('local')->put($path, json_encode($timetable, JSON_PRETTY_PRINT));
+
+    session(['timetable' => $timetable]);
 
     return redirect('/admin/timetable')->with('status', 'Timetable generated: '.$path);
 });
