@@ -11,8 +11,8 @@ class TimetableGenerator
             $facultyMap[$faculty['name']] = $faculty;
         }
 
-        $theoryRooms = array_values(array_filter($classrooms, fn ($room) => strtolower($room['room_type']) === 'theory'));
-        $labRooms = array_values(array_filter($classrooms, fn ($room) => strtolower($room['room_type']) === 'lab'));
+        $theoryRooms = array_values(array_filter($classrooms, fn ($room) => $this->isTheoryRoom($room)));
+        $labRooms = array_values(array_filter($classrooms, fn ($room) => $this->isLabRoom($room)));
 
         $sessions = [];
         $used = [];
@@ -48,9 +48,20 @@ class TimetableGenerator
 
     private function addTheorySessions(array &$sessions, array &$used, array $subject, array $faculty, array $rooms, array $days, array $timeSlots, int $hours): void
     {
-        $room = $rooms[0] ?? ['room_number' => 'TBA'];
+        $availableRooms = array_values(array_filter($rooms, function (array $room): bool {
+            return $this->isRoomAvailable($room);
+        }));
+
+        if ($availableRooms === []) {
+            return;
+        }
 
         for ($i = 0; $i < $hours; $i++) {
+            $room = $this->pickBestRoom($availableRooms, $used, $days, $timeSlots);
+            if ($room === null) {
+                break;
+            }
+
             [$day, $slot] = $this->findNextAvailableSlot($used, $days, $timeSlots, $faculty['name'], $room['room_number']);
 
             if ($day === null || $slot === null) {
@@ -74,7 +85,18 @@ class TimetableGenerator
 
     private function addLabSessions(array &$sessions, array &$used, array $subject, array $faculty, array $rooms, array $days, array $timeSlots): void
     {
-        $room = $rooms[0] ?? ['room_number' => 'LAB'];
+        $availableRooms = array_values(array_filter($rooms, function (array $room): bool {
+            return $this->isRoomAvailable($room);
+        }));
+
+        if ($availableRooms === []) {
+            return;
+        }
+
+        $room = $this->pickBestRoom($availableRooms, $used, $days, $timeSlots);
+        if ($room === null) {
+            return;
+        }
 
         [$day, $slot] = $this->findNextAvailableLabSlot($used, $days, $timeSlots, $faculty['name'], $room['room_number']);
 
@@ -127,6 +149,30 @@ class TimetableGenerator
         }
 
         return [$bestDay, $bestSlot];
+    }
+
+    private function pickBestRoom(array $rooms, array $used, array $days, array $timeSlots): ?array
+    {
+        $bestRoom = null;
+        $bestScore = null;
+
+        foreach ($rooms as $room) {
+            $score = 0;
+            foreach ($days as $day) {
+                foreach ($timeSlots as $slot) {
+                    if (isset($used[$this->makeKey($room['room_number'], $day, $slot)])) {
+                        $score++;
+                    }
+                }
+            }
+
+            if ($bestScore === null || $score < $bestScore) {
+                $bestScore = $score;
+                $bestRoom = $room;
+            }
+        }
+
+        return $bestRoom;
     }
 
     private function findNextAvailableLabSlot(array $used, array $days, array $timeSlots, string $faculty, string $room): array
@@ -183,6 +229,27 @@ class TimetableGenerator
         }
 
         return $count;
+    }
+
+    private function isTheoryRoom(array $room): bool
+    {
+        $type = strtolower((string) ($room['room_type'] ?? ''));
+
+        return $type === 'classroom' || $type === 'theory' || $type === 'lecture';
+    }
+
+    private function isLabRoom(array $room): bool
+    {
+        $type = strtolower((string) ($room['room_type'] ?? ''));
+
+        return $type === 'lab' || $type === 'laboratory';
+    }
+
+    private function isRoomAvailable(array $room): bool
+    {
+        $availability = strtolower((string) ($room['availability'] ?? ''));
+
+        return $availability !== 'booked' && $availability !== 'maintenance';
     }
 
     private function makeKey(string $value, string $day, string $timeSlot): string

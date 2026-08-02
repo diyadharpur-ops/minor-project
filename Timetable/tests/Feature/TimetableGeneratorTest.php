@@ -34,8 +34,9 @@ it('generates conflict-free weekly sessions for a selected semester', function (
     ];
 
     $classrooms = [
-        ['id' => 1, 'room_number' => 'A101', 'room_type' => 'Theory', 'availability' => 'Available'],
-        ['id' => 2, 'room_number' => 'LAB1', 'room_type' => 'Lab', 'availability' => 'Available'],
+        ['id' => 1, 'room_number' => 'A101', 'room_type' => 'Classroom', 'availability' => 'Booked'],
+        ['id' => 2, 'room_number' => 'A102', 'room_type' => 'Classroom', 'availability' => 'Available'],
+        ['id' => 3, 'room_number' => 'LAB1', 'room_type' => 'Lab', 'availability' => 'Available'],
     ];
 
     $result = $generator->generate(
@@ -54,6 +55,8 @@ it('generates conflict-free weekly sessions for a selected semester', function (
     expect($labBlocks)->toHaveCount(1);
     expect($labBlocks[0]['day'])->toBeString();
     expect($labBlocks[0]['time_slot'])->toBeString();
+
+    $this->assertTrue(collect($result['sessions'])->contains(fn ($session) => $session['room'] === 'A102'));
 
     foreach ($result['sessions'] as $session) {
         $facultyKey = $session['faculty'] . '|' . $session['day'] . '|' . $session['time_slot'];
