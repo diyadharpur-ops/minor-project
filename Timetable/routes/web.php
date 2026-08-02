@@ -81,89 +81,165 @@ Route::post('/admin/notifications', function (Request $request) {
 });
 
 // Timetable generation
-Route::get('/admin/timetable', function () {
+Route::match(['get', 'post'], '/admin/timetable', function () {
     if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
     $semesters = Subject::select('semester')->distinct()->pluck('semester')->filter()->values();
 
+    $departments = Department::all();
+
+    $timeSlots = ['08:30-09:30', '09:30-10:30', '10:30-11:30', '11:30-12:30', '01:00-02:00', '02:00-03:00', '03:10-04:10', '04:10-05:10', '05:10-06:10'];
+    $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    $timetable = null;
+    $deptName = null;
+
+    if (request()->isMethod('post') || (request()->has('department_id') && request()->has('semester') && request()->has('division'))) {
+        $deptId = request('department_id');
+        $semester = request('semester');
+        $division = request('division');
+        $academicYear = request('academic_year');
+        $term = request('term');
+
+        $entries = \App\Models\TimetableEntry::with(['subject', 'faculty', 'classroom'])
+            ->where('department_id', $deptId)
+            ->where('semester', $semester)
+            ->where('division', $division)
+            ->get();
+        
+        $dept = Department::find($deptId);
+        $deptName = $dept ? $dept->name : '';
+
+        // format to match index.blade.php expectations
+        $sessions = [];
+        foreach ($entries as $entry) {
+            $sessions[] = [
+                'day' => $entry->day,
+                'time_slot' => $entry->time_slot,
+                'subject' => $entry->subject ? $entry->subject->name : '',
+                'faculty' => $entry->faculty ? $entry->faculty->name : '',
+                'room' => $entry->classroom ? $entry->classroom->room_number : '',
+                'type' => $entry->lecture_type,
+                'duration' => $entry->duration,
+            ];
+        }
+
+        $timetable = [
+            'days' => $days,
+            'time_slots' => $timeSlots,
+            'sessions' => $sessions,
+            'academic_year' => $academicYear,
+            'term' => $term,
+            'division' => $division
+        ];
+    }
+
     return view('admin.timetable.index', [
-        'semesters' => $semesters,
-        'days' => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
-        'timeSlots' => ['09:00-10:00', '10:00-11:00', '11:00-12:00', '01:00-02:00', '02:00-03:00'],
-        'timetable' => session('timetable'),
+        'departments' => $departments,
+        'timetable' => $timetable,
+        'deptName' => $deptName,
+        'semester' => request('semester'),
+        'division' => request('division', 'A'),
+        'academicYear' => request('academic_year', date('Y').'-'.(date('Y')+1)),
+        'term' => request('term', 'Odd')
     ]);
 });
 
-Route::post('/admin/timetable/generate', function (Request $request) {
+Route::get('/admin/timetable/builder', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $departments = Department::all();
+    $subjects = Subject::all();
+    $faculties = Faculty::all();
+    $classrooms = Classroom::all();
+
+    $timeSlots = ['08:30-09:30', '09:30-10:30', '10:30-11:30', '11:30-12:30', '01:00-02:00', '02:00-03:00', '03:10-04:10', '04:10-05:10', '05:10-06:10'];
+    $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    $entries = collect([]);
+    if ($request->has('department_id') && $request->has('semester') && $request->has('division')) {
+        $entries = \App\Models\TimetableEntry::where('department_id', $request->department_id)
+            ->where('semester', $request->semester)
+            ->where('division', $request->division)
+            ->get();
+    }
+
+    return view('admin.timetable.builder', compact('departments', 'subjects', 'faculties', 'classrooms', 'timeSlots', 'days', 'entries'));
+});
+
+Route::post('/admin/timetable/builder', function (Request $request) {
     if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
     $data = $request->validate([
+        'department_id' => 'required|integer',
         'semester' => 'required|string',
-        'days' => 'nullable|string',
-        'time_slots' => 'nullable|string',
+        'division' => 'required|string',
+        'academic_year' => 'required|string',
+        'term' => 'required|string',
+        'entries' => 'nullable|array'
     ]);
 
-    $days = array_values(array_filter(array_map('trim', preg_split('/\r\n|\n|,/', $data['days'] ?? ''))));
-    $timeSlots = array_values(array_filter(array_map('trim', preg_split('/\r\n|\n|,/', $data['time_slots'] ?? ''))));
+    // Validation: prevent duplicate faculty and room
+    $entriesData = $request->input('entries', []);
+    $facultyTimeSlots = [];
+    $roomTimeSlots = [];
 
-    if ($days === []) {
-        $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    foreach ($entriesData as $key => $entry) {
+        if (empty($entry['subject_id'])) continue; // skip empty cells
+
+        $daySlot = $entry['day'] . '_' . $entry['time_slot'];
+
+        if (!empty($entry['faculty_id'])) {
+            $facultySlot = $entry['faculty_id'] . '_' . $daySlot;
+            if (isset($facultyTimeSlots[$facultySlot])) {
+                return back()->with('error', 'Duplicate faculty assignment detected for ' . $entry['day'] . ' at ' . $entry['time_slot'])->withInput();
+            }
+            $facultyTimeSlots[$facultySlot] = true;
+        }
+
+        if (!empty($entry['classroom_id'])) {
+            $roomSlot = $entry['classroom_id'] . '_' . $daySlot;
+            if (isset($roomTimeSlots[$roomSlot])) {
+                return back()->with('error', 'Duplicate room assignment detected for ' . $entry['day'] . ' at ' . $entry['time_slot'])->withInput();
+            }
+            $roomTimeSlots[$roomSlot] = true;
+        }
     }
 
-    if ($timeSlots === []) {
-        $timeSlots = ['09:00-10:00', '10:00-11:00', '11:00-12:00', '01:00-02:00', '02:00-03:00'];
+    // Delete existing entries for this class
+    \App\Models\TimetableEntry::where('department_id', $data['department_id'])
+        ->where('semester', $data['semester'])
+        ->where('division', $data['division'])
+        ->delete();
+
+    // Insert new entries
+    foreach ($entriesData as $key => $entry) {
+        if (empty($entry['subject_id'])) continue;
+
+        \App\Models\TimetableEntry::create([
+            'department_id' => $data['department_id'],
+            'semester' => $data['semester'],
+            'division' => $data['division'],
+            'academic_year' => $data['academic_year'],
+            'term' => $data['term'],
+            'day' => $entry['day'],
+            'time_slot' => $entry['time_slot'],
+            'subject_id' => $entry['subject_id'] ?: null,
+            'faculty_id' => $entry['faculty_id'] ?: null,
+            'classroom_id' => $entry['classroom_id'] ?: null,
+            'lecture_type' => $entry['lecture_type'] ?: null,
+            'duration' => $entry['duration'] ?? 1,
+            'notes' => null
+        ]);
     }
 
-    $subjects = Subject::where('semester', $data['semester'])->get()->map(function ($subject) {
-        $subjectType = strtolower((string) ($subject->subject_type ?? 'lecture'));
-        $type = $subjectType === 'lab' ? 'lab' : ($subjectType === 'tutorial' ? 'tutorial' : 'theory');
-        $theoryHours = $subject->credit ?? 0;
-        $practicalHours = $type === 'lab' ? 2 : 0;
-
-        return [
-            'id' => $subject->id,
-            'name' => $subject->name,
-            'subject_code' => $subject->subject_code,
-            'semester' => $subject->semester,
-            'credit' => (int) ($subject->credit ?? 0),
-            'theory_hours' => $type === 'theory' ? $theoryHours : 0,
-            'practical_hours' => $practicalHours,
-            'faculty_name' => $subject->faculty_name,
-            'subject_type' => $subject->subject_type ?? $type,
-        ];
-    })->values()->all();
-
-    $faculties = Faculty::all()->map(function ($faculty) {
-        return [
-            'id' => $faculty->id,
-            'name' => $faculty->name,
-            'availability' => $faculty->designation ?? 'Available',
-            'subjects' => $faculty->subjects ? explode(',', $faculty->subjects) : [],
-        ];
-    })->values()->all();
-
-    $classrooms = Classroom::all()->map(function ($classroom) {
-        return [
-            'id' => $classroom->id,
-            'room_number' => $classroom->room_number,
-            'room_type' => $classroom->room_type,
-            'availability' => $classroom->availability,
-        ];
-    })->values()->all();
-
-    $generator = new TimetableGenerator();
-    $timetable = $generator->generate($data['semester'], $days, $timeSlots, $subjects, $faculties, $classrooms);
-
-    $path = 'timetables/generated-'.now()->format('YmdHis').'.json';
-    Storage::disk('local')->put($path, json_encode($timetable, JSON_PRETTY_PRINT));
-
-    session(['timetable' => $timetable]);
-
-    return redirect('/admin/timetable')->with('status', 'Timetable generated: '.$path);
+    return redirect('/admin/timetable/builder?department_id='.$data['department_id'].'&semester='.$data['semester'].'&division='.$data['division'].'&academic_year='.$data['academic_year'].'&term='.$data['term'])->with('status', 'Timetable saved successfully!');
 });
 
 // Reports
