@@ -79,6 +79,36 @@ Route::post('/admin/notifications', function (Request $request) {
     return redirect('/admin/notifications');
 });
 
+// Timetable generation
+Route::get('/admin/timetable', function () {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    return view('admin.timetable.index');
+});
+
+Route::post('/admin/timetable/generate', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    // Placeholder generator: create a small file to indicate generation time
+    $path = 'timetables/generated-'.now()->format('YmdHis').'.json';
+    Storage::disk('local')->put($path, json_encode(['generated_at' => now()->toDateTimeString()], JSON_PRETTY_PRINT));
+
+    return redirect('/admin/timetable')->with('status', 'Timetable generated: '.$path);
+});
+
+// Reports
+Route::get('/admin/reports', function () {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    return view('admin.reports.index');
+});
+
 // Departments management
 Route::get('/admin/departments', function (Request $request) {
     if (! session('admin.auth')) {
@@ -114,7 +144,7 @@ Route::post('/admin/departments', function (Request $request) {
     $data = $request->validate([
         'name' => 'required|string|max:255',
         'code' => 'nullable|string|max:50',
-        'description' => 'nullable|string',
+        'hod_name' => 'nullable|string|max:255',
     ]);
 
     Department::create($data);
@@ -140,7 +170,7 @@ Route::post('/admin/departments/{id}', function (Request $request, $id) {
     $data = $request->validate([
         'name' => 'required|string|max:255',
         'code' => 'nullable|string|max:50',
-        'description' => 'nullable|string',
+        'hod_name' => 'nullable|string|max:255',
     ]);
 
     $dept = Department::findOrFail($id);
@@ -172,8 +202,7 @@ Route::get('/admin/faculties', function (Request $request) {
 
     if ($q) {
         $query->where('name', 'like', "%{$q}%")
-            ->orWhere('email', 'like', "%{$q}%")
-            ->orWhere('qualification', 'like', "%{$q}%");
+            ->orWhere('email', 'like', "%{$q}%");
     }
 
     $faculties = $query->orderBy('created_at', 'desc')->get();
@@ -196,9 +225,9 @@ Route::post('/admin/faculties', function (Request $request) {
 
     $data = $request->validate([
         'name' => 'required|string|max:255',
-        'mobile_number' => 'required|string|max:20',
+        'designation' => 'required|string|max:255',
         'email' => 'required|email|max:255|unique:faculties,email',
-        'qualification' => 'required|string|max:255',
+        'password' => 'required|string|min:8',
         'department_id' => 'required|exists:departments,id',
         'subjects' => 'nullable|string|max:1000',
     ]);
@@ -212,9 +241,8 @@ Route::post('/admin/faculties', function (Request $request) {
         Storage::disk('local')->put($filePath, json_encode([
             'id' => $faculty->id,
             'name' => $faculty->name,
-            'mobile_number' => $faculty->mobile_number,
+            'designation' => $faculty->designation,
             'email' => $faculty->email,
-            'qualification' => $faculty->qualification,
             'department' => $department->name,
             'subjects' => $faculty->subjects,
         ], JSON_PRETTY_PRINT));
@@ -243,12 +271,16 @@ Route::post('/admin/faculties/{id}', function (Request $request, $id) {
 
     $data = $request->validate([
         'name' => 'required|string|max:255',
-        'mobile_number' => 'required|string|max:20',
+        'designation' => 'required|string|max:255',
         'email' => 'required|email|max:255|unique:faculties,email,'.$faculty->id,
-        'qualification' => 'required|string|max:255',
+        'password' => 'nullable|string|min:8',
         'department_id' => 'required|exists:departments,id',
         'subjects' => 'nullable|string|max:1000',
     ]);
+
+    if (empty($data['password'])) {
+        unset($data['password']);
+    }
 
     $faculty->update($data);
 
@@ -259,9 +291,8 @@ Route::post('/admin/faculties/{id}', function (Request $request, $id) {
         Storage::disk('local')->put($filePath, json_encode([
             'id' => $faculty->id,
             'name' => $faculty->name,
-            'mobile_number' => $faculty->mobile_number,
+            'designation' => $faculty->designation,
             'email' => $faculty->email,
-            'qualification' => $faculty->qualification,
             'department' => $department->name,
             'subjects' => $faculty->subjects,
         ], JSON_PRETTY_PRINT));

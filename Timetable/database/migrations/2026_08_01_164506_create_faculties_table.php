@@ -11,9 +11,10 @@ return new class extends Migration
         Schema::create('faculties', function (Blueprint $table) {
             $table->id();
             $table->string('name');
-            $table->string('mobile_number')->nullable();
             $table->string('email')->unique();
             $table->string('qualification')->nullable();
+            $table->string('designation')->nullable();
+            $table->string('password')->nullable();
             $table->foreignId('department_id')->constrained()->cascadeOnDelete();
             $table->text('subjects')->nullable();
             $table->string('folder_path')->nullable();

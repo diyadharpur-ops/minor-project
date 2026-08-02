@@ -28,7 +28,7 @@
                         <th>#</th>
                         <th>Name</th>
                         <th>Code</th>
-                        <th>Description</th>
+                        <th>HOD Name</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -38,7 +38,7 @@
                             <td>{{ $d->id }}</td>
                             <td>{{ $d->name }}</td>
                             <td>{{ $d->code }}</td>
-                            <td>{{ $d->description }}</td>
+                            <td>{{ $d->hod_name }}</td>
                             <td class="actions">
                                 <a href="/admin/departments/{{ $d->id }}/edit" class="btn btn-muted">Edit</a>
                                 <form method="POST" action="/admin/departments/{{ $d->id }}/delete">

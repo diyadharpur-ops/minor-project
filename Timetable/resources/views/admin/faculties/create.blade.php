@@ -23,16 +23,16 @@
                 <input type="text" name="name" value="{{ old('name') }}" required />
             </div>
             <div class="form-row">
-                <label>Mobile Number</label>
-                <input type="text" name="mobile_number" value="{{ old('mobile_number') }}" required />
+                <label>Designation</label>
+                <input type="text" name="designation" value="{{ old('designation') }}" required />
             </div>
             <div class="form-row">
                 <label>Email</label>
                 <input type="email" name="email" value="{{ old('email') }}" required />
             </div>
             <div class="form-row">
-                <label>Qualification</label>
-                <input type="text" name="qualification" value="{{ old('qualification') }}" required />
+                <label>Password</label>
+                <input type="password" name="password" value="" required />
             </div>
             <div class="form-row">
                 <label>Department</label>

@@ -37,5 +37,15 @@
             <p>Send updates to faculty and students.</p>
             <a href="/admin/notifications" class="btn">Open</a>
         </div>
+        <div class="card">
+            <h3>Generate Timetable</h3>
+            <p>Create a timetable automatically based on subjects and classrooms.</p>
+            <a href="/admin/timetable" class="btn">Generate</a>
+        </div>
+        <div class="card">
+            <h3>Reports</h3>
+            <p>View and export timetable and attendance reports.</p>
+            <a href="/admin/reports" class="btn">Open</a>
+        </div>
     </div>
 @endsection

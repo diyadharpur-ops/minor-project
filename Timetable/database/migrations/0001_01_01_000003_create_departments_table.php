@@ -12,7 +12,7 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('code')->nullable();
-            $table->text('description')->nullable();
+            $table->string('hod_name')->nullable();
             $table->timestamps();
         });
     }

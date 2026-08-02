@@ -27,8 +27,8 @@
                 <input type="text" name="code" value="{{ old('code', $dept->code) }}" />
             </div>
             <div class="form-row">
-                <label>Description</label>
-                <textarea name="description" rows="4">{{ old('description', $dept->description) }}</textarea>
+                <label>HOD Name</label>
+                <input type="text" name="hod_name" value="{{ old('hod_name', $dept->hod_name) }}" />
             </div>
             <div class="page-actions">
                 <button type="submit" class="btn">Save</button>

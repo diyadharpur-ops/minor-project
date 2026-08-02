@@ -23,16 +23,20 @@
                 <input type="text" name="name" value="{{ old('name', $faculty->name) }}" required />
             </div>
             <div class="form-row">
-                <label>Mobile Number</label>
-                <input type="text" name="mobile_number" value="{{ old('mobile_number', $faculty->mobile_number) }}" required />
+                <label>Designation</label>
+                <input type="text" name="designation" value="{{ old('designation', $faculty->designation) }}" required />
             </div>
             <div class="form-row">
                 <label>Email</label>
                 <input type="email" name="email" value="{{ old('email', $faculty->email) }}" required />
             </div>
             <div class="form-row">
-                <label>Qualification</label>
-                <input type="text" name="qualification" value="{{ old('qualification', $faculty->qualification) }}" required />
+                <label>Change Password (leave blank to keep)</label>
+                <input type="password" name="password" value="" />
+            </div>
+            <div class="form-row">
+                <label>Change Password (leave blank to keep)</label>
+                <input type="password" name="password" value="" />
             </div>
             <div class="form-row">
                 <label>Department</label>

@@ -16,7 +16,7 @@
 
     <div class="page-card">
         <form method="GET" action="/admin/faculties" class="search">
-            <input type="text" name="q" placeholder="Search by name, email or qualification" value="{{ $q ?? '' }}" />
+            <input type="text" name="q" placeholder="Search by name or email" value="{{ $q ?? '' }}" />
             <button type="submit" class="btn">Search</button>
             <a href="/admin/faculties" class="btn btn-muted">Clear</a>
         </form>
@@ -27,9 +27,8 @@
                     <tr>
                         <th>#</th>
                         <th>Name</th>
-                        <th>Mobile</th>
+                        <th>Designation</th>
                         <th>Email</th>
-                        <th>Qualification</th>
                         <th>Department</th>
                         <th>Subjects</th>
                         <th>Actions</th>
@@ -40,9 +39,8 @@
                         <tr>
                             <td>{{ $faculty->id }}</td>
                             <td>{{ $faculty->name }}</td>
-                            <td>{{ $faculty->mobile_number }}</td>
+                            <td>{{ $faculty->designation }}</td>
                             <td>{{ $faculty->email }}</td>
-                            <td>{{ $faculty->qualification }}</td>
                             <td>{{ $faculty->department?->name ?? 'N/A' }}</td>
                             <td>{{ $faculty->subjects }}</td>
                             <td class="actions">

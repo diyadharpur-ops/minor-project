@@ -47,6 +47,29 @@
             .page-header { flex-direction: column; align-items: flex-start; }
         }
     </style>
+    <script>
+        // Simple modal utility and subtle animations
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('.btn').forEach(function (el) {
+                el.addEventListener('click', function () {
+                    el.style.transform = 'translateY(-2px)';
+                    setTimeout(function () { el.style.transform = ''; }, 120);
+                });
+            });
+            // Confirm destructive actions
+            document.querySelectorAll('.btn-danger').forEach(function (btn) {
+                btn.addEventListener('click', function (ev) {
+                    var ok = confirm('Are you sure you want to delete this item?');
+                    if (! ok) {
+                        ev.preventDefault();
+                        ev.stopImmediatePropagation();
+                        return false;
+                    }
+                    // let form submit
+                });
+            });
+        });
+    </script>
 </head>
 <body>
     <div class="admin-layout">
@@ -61,6 +84,8 @@
             <a href="/admin/subjects" class="sidebar-link {{ request()->is('admin/subjects*') ? 'active' : '' }}">Manage Subjects</a>
             <a href="/admin/classrooms" class="sidebar-link {{ request()->is('admin/classrooms*') ? 'active' : '' }}">Manage Classrooms</a>
             <a href="/admin/notifications" class="sidebar-link {{ request()->is('admin/notifications*') ? 'active' : '' }}">Notification Management</a>
+            <a href="/admin/timetable" class="sidebar-link {{ request()->is('admin/timetable*') ? 'active' : '' }}">Generate Timetable</a>
+            <a href="/admin/reports" class="sidebar-link {{ request()->is('admin/reports*') ? 'active' : '' }}">Reports</a>
             <a href="/admin/profile" class="sidebar-link {{ request()->is('admin/profile') ? 'active' : '' }}">Admin Profile</a>
             <form method="POST" action="/admin/logout">
                 @csrf
