@@ -1,34 +1,37 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Subject</title>
-    <style>body{font-family:Arial, sans-serif; padding:24px; background:#f4f7fb} .card{background:white;padding:18px;border-radius:10px;max-width:700px;margin:0 auto} .btn{padding:8px 12px;border-radius:8px;text-decoration:none;color:white;background:#2563eb;border:none;cursor:pointer}</style>
-</head>
-<body>
-    <div class="card">
-        <h1>Add Subject</h1>
+@extends('admin.layout')
+
+@section('title', 'Create Subject')
+
+@section('content')
+    <div class="page-header">
+        <div>
+            <h1>Add Subject</h1>
+            <p>Create a new subject entry for the timetable system.</p>
+        </div>
+        <a href="/admin/subjects" class="btn btn-muted">Back</a>
+    </div>
+
+    <div class="page-card">
         @if ($errors->any())
-            <div style="color:#b91c1c">{{ $errors->first() }}</div>
+            <div class="alert">{{ $errors->first() }}</div>
         @endif
 
         <form method="POST" action="/admin/subjects">
             @csrf
-            <div>
-                <label>Subject Name</label><br>
+            <div class="form-row">
+                <label>Subject Name</label>
                 <input type="text" name="name" value="{{ old('name') }}" required />
             </div>
-            <div>
-                <label>Subject Code</label><br>
+            <div class="form-row">
+                <label>Subject Code</label>
                 <input type="text" name="subject_code" value="{{ old('subject_code') }}" required />
             </div>
-            <div>
-                <label>Semester</label><br>
+            <div class="form-row">
+                <label>Semester</label>
                 <input type="text" name="semester" value="{{ old('semester') }}" required />
             </div>
-            <div>
-                <label>Department</label><br>
+            <div class="form-row">
+                <label>Department</label>
                 <select name="department_id" required>
                     <option value="">Select department</option>
                     @foreach ($departments as $department)
@@ -36,19 +39,18 @@
                     @endforeach
                 </select>
             </div>
-            <div>
-                <label>Credit</label><br>
+            <div class="form-row">
+                <label>Credit</label>
                 <input type="number" name="credit" min="1" max="10" value="{{ old('credit') }}" />
             </div>
-            <div>
-                <label>Faculty Name</label><br>
+            <div class="form-row">
+                <label>Faculty Name</label>
                 <input type="text" name="faculty_name" value="{{ old('faculty_name') }}" />
             </div>
-            <div style="margin-top:12px">
+            <div class="page-actions">
                 <button type="submit" class="btn">Create</button>
-                <a href="/admin/subjects" style="background:#6b7280; color:white; padding:8px 12px; border-radius:8px; text-decoration:none; margin-left:8px">Cancel</a>
+                <a href="/admin/subjects" class="btn btn-muted">Cancel</a>
             </div>
         </form>
     </div>
-</body>
-</html>
+@endsection

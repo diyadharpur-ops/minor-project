@@ -1,38 +1,41 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Faculty</title>
-    <style>body{font-family:Arial, sans-serif; padding:24px; background:#f4f7fb} .card{background:white;padding:18px;border-radius:10px;max-width:700px;margin:0 auto} .btn{padding:8px 12px;border-radius:8px;text-decoration:none;color:white;background:#2563eb;border:none;cursor:pointer}</style>
-</head>
-<body>
-    <div class="card">
-        <h1>Add Faculty</h1>
+@extends('admin.layout')
+
+@section('title', 'Create Faculty')
+
+@section('content')
+    <div class="page-header">
+        <div>
+            <h1>Add Faculty</h1>
+            <p>Create a faculty profile linked to a department.</p>
+        </div>
+        <a href="/admin/faculties" class="btn btn-muted">Back</a>
+    </div>
+
+    <div class="page-card">
         @if ($errors->any())
-            <div style="color:#b91c1c">{{ $errors->first() }}</div>
+            <div class="alert">{{ $errors->first() }}</div>
         @endif
 
         <form method="POST" action="/admin/faculties">
             @csrf
-            <div>
-                <label>Name</label><br>
+            <div class="form-row">
+                <label>Name</label>
                 <input type="text" name="name" value="{{ old('name') }}" required />
             </div>
-            <div>
-                <label>Mobile Number</label><br>
+            <div class="form-row">
+                <label>Mobile Number</label>
                 <input type="text" name="mobile_number" value="{{ old('mobile_number') }}" required />
             </div>
-            <div>
-                <label>Email</label><br>
+            <div class="form-row">
+                <label>Email</label>
                 <input type="email" name="email" value="{{ old('email') }}" required />
             </div>
-            <div>
-                <label>Qualification</label><br>
+            <div class="form-row">
+                <label>Qualification</label>
                 <input type="text" name="qualification" value="{{ old('qualification') }}" required />
             </div>
-            <div>
-                <label>Department</label><br>
+            <div class="form-row">
+                <label>Department</label>
                 <select name="department_id" required>
                     <option value="">Select department</option>
                     @foreach ($departments as $department)
@@ -40,15 +43,14 @@
                     @endforeach
                 </select>
             </div>
-            <div>
-                <label>Subjects</label><br>
-                <textarea name="subjects">{{ old('subjects') }}</textarea>
+            <div class="form-row">
+                <label>Subjects</label>
+                <textarea name="subjects" rows="4">{{ old('subjects') }}</textarea>
             </div>
-            <div style="margin-top:12px">
+            <div class="page-actions">
                 <button type="submit" class="btn">Create</button>
-                <a href="/admin/faculties" style="background:#6b7280; color:white; padding:8px 12px; border-radius:8px; text-decoration:none; margin-left:8px">Cancel</a>
+                <a href="/admin/faculties" class="btn btn-muted">Cancel</a>
             </div>
         </form>
     </div>
-</body>
-</html>
+@endsection
