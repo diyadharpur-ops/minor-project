@@ -672,3 +672,4 @@ Route::middleware(['web'])->group(function () {
         return redirect('/')->with('status', 'You have been logged out.');
     });
 });
+
