@@ -23,6 +23,7 @@ test('admin can create and list subjects in department and semester folders', fu
         'department_id' => $department->id,
         'credit' => 3,
         'faculty_name' => 'Dr. Jane Smith',
+        'subject_type' => 'lecture',
     ]);
 
     $response->assertRedirect('/admin/subjects');
@@ -34,6 +35,7 @@ test('admin can create and list subjects in department and semester folders', fu
         'department_id' => $department->id,
         'credit' => 3,
         'faculty_name' => 'Dr. Jane Smith',
+        'subject_type' => 'lecture',
     ]);
 
     $this->get('/admin/subjects')->assertOk();

@@ -119,7 +119,8 @@ Route::post('/admin/timetable/generate', function (Request $request) {
     }
 
     $subjects = Subject::where('semester', $data['semester'])->get()->map(function ($subject) {
-        $type = Str::contains(Str::lower($subject->name), 'lab') ? 'lab' : 'theory';
+        $subjectType = strtolower((string) ($subject->subject_type ?? 'lecture'));
+        $type = $subjectType === 'lab' ? 'lab' : ($subjectType === 'tutorial' ? 'tutorial' : 'theory');
         $theoryHours = $subject->credit ?? 0;
         $practicalHours = $type === 'lab' ? 2 : 0;
 
@@ -132,6 +133,7 @@ Route::post('/admin/timetable/generate', function (Request $request) {
             'theory_hours' => $type === 'theory' ? $theoryHours : 0,
             'practical_hours' => $practicalHours,
             'faculty_name' => $subject->faculty_name,
+            'subject_type' => $subject->subject_type ?? $type,
         ];
     })->values()->all();
 
@@ -422,6 +424,7 @@ Route::post('/admin/subjects', function (Request $request) {
         'department_id' => 'required|exists:departments,id',
         'credit' => 'nullable|integer|min:1|max:10',
         'faculty_name' => 'nullable|string|max:255',
+        'subject_type' => 'required|string|in:lecture,lab,tutorial',
     ]);
 
     $subject = Subject::create($data);
@@ -438,6 +441,7 @@ Route::post('/admin/subjects', function (Request $request) {
             'department' => $department->name,
             'credit' => $subject->credit,
             'faculty_name' => $subject->faculty_name,
+            'subject_type' => $subject->subject_type,
         ], JSON_PRETTY_PRINT));
         $subject->update(['folder_path' => $filePath]);
     }
@@ -469,6 +473,7 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
         'department_id' => 'required|exists:departments,id',
         'credit' => 'nullable|integer|min:1|max:10',
         'faculty_name' => 'nullable|string|max:255',
+        'subject_type' => 'required|string|in:lecture,lab,tutorial',
     ]);
 
     $subject->update($data);
@@ -490,6 +495,7 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
             'department' => $department->name,
             'credit' => $subject->credit,
             'faculty_name' => $subject->faculty_name,
+            'subject_type' => $subject->subject_type,
         ], JSON_PRETTY_PRINT));
         $subject->update(['folder_path' => $filePath]);
     }

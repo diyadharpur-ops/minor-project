@@ -192,6 +192,16 @@ class TimetableGenerator
 
     private function resolveType(array $subject): string
     {
+        $subjectType = strtolower((string) ($subject['subject_type'] ?? $subject['type'] ?? ''));
+
+        if ($subjectType === 'lab') {
+            return 'lab';
+        }
+
+        if ($subjectType === 'tutorial') {
+            return 'tutorial';
+        }
+
         if ((int) ($subject['practical_hours'] ?? 0) > 0) {
             return 'lab';
         }

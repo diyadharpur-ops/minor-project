@@ -47,6 +47,14 @@
                 <label>Faculty Name</label>
                 <input type="text" name="faculty_name" value="{{ old('faculty_name', $subject->faculty_name) }}" />
             </div>
+            <div class="form-row">
+                <label>Subject Type</label>
+                <select name="subject_type" required>
+                    <option value="lecture" {{ old('subject_type', $subject->subject_type ?? 'lecture') === 'lecture' ? 'selected' : '' }}>Lecture</option>
+                    <option value="lab" {{ old('subject_type', $subject->subject_type ?? 'lecture') === 'lab' ? 'selected' : '' }}>Lab</option>
+                    <option value="tutorial" {{ old('subject_type', $subject->subject_type ?? 'lecture') === 'tutorial' ? 'selected' : '' }}>Tutorial</option>
+                </select>
+            </div>
             <div class="page-actions">
                 <button type="submit" class="btn">Save</button>
                 <a href="/admin/subjects" class="btn btn-muted">Cancel</a>

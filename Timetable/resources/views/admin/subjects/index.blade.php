@@ -32,6 +32,7 @@
                         <th>Department</th>
                         <th>Credit</th>
                         <th>Faculty</th>
+                        <th>Type</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -45,6 +46,7 @@
                             <td>{{ $subject->department?->name ?? 'N/A' }}</td>
                             <td>{{ $subject->credit }}</td>
                             <td>{{ $subject->faculty_name }}</td>
+                            <td>{{ ucfirst($subject->subject_type ?? 'lecture') }}</td>
                             <td class="actions">
                                 <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
                                 <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
@@ -54,7 +56,7 @@
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="8">No subjects found.</td></tr>
+                        <tr><td colspan="9">No subjects found.</td></tr>
                     @endforelse
                 </tbody>
             </table>
