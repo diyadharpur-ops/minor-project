@@ -16,12 +16,17 @@ class TimetableGenerator
 
         $sessions = [];
         $used = [];
+        $subjectLoad = [];
+
+        $subjects = array_values(array_filter($subjects, fn ($subject) => (string) ($subject['semester'] ?? '') === (string) $semester));
+        usort($subjects, function ($a, $b) {
+            $aHours = (int) (($a['theory_hours'] ?? 0) + ($a['practical_hours'] ?? 0));
+            $bHours = (int) (($b['theory_hours'] ?? 0) + ($b['practical_hours'] ?? 0));
+
+            return $bHours <=> $aHours;
+        });
 
         foreach ($subjects as $subject) {
-            if ((string) $subject['semester'] !== (string) $semester) {
-                continue;
-            }
-
             $type = $this->resolveType($subject);
             $hours = $type === 'lab' ? (int) ($subject['practical_hours'] ?? 0) : (int) ($subject['theory_hours'] ?? 0);
             $faculty = $facultyMap[$subject['faculty_name']] ?? null;
