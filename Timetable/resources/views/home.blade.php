@@ -192,14 +192,15 @@
             <section id="faculty" class="card">
                 <h2>Faculty Login</h2>
                 <p>Enter your faculty email and password.</p>
-                <form class="form-grid">
+                <form class="form-grid" action="/faculty/login" method="POST">
+                    @csrf
                     <div class="field">
                         <label for="faculty-email">Faculty Email</label>
-                        <input id="faculty-email" type="email" placeholder="faculty@example.com">
+                        <input id="faculty-email" name="email" type="email" placeholder="faculty@example.com" value="{{ old('email', 'faculty@example.com') }}" required>
                     </div>
                     <div class="field">
                         <label for="faculty-password">Password</label>
-                        <input id="faculty-password" type="password" placeholder="Enter password">
+                        <input id="faculty-password" name="password" type="password" placeholder="Enter password" value="password" required>
                     </div>
                     <div class="actions">
                         <button type="submit">Login</button>

@@ -577,6 +577,43 @@ Route::post('/student/register', function (Request $request) {
     return redirect('/student/dashboard')->with('status', 'Successfully registered.');
 });
 
+Route::post('/faculty/login', function (Request $request) {
+    $data = $request->validate([
+        'email' => 'required|email',
+        'password' => 'required|string',
+    ]);
+
+    $faculty = Faculty::where('email', $data['email'])->first();
+
+    // Fallback for default testing credentials
+    if ($data['email'] === 'faculty@example.com' && $data['password'] === 'password' && !$faculty) {
+        session(['faculty.auth' => [
+            'id' => 999,
+            'name' => 'Demo Faculty',
+            'email' => 'faculty@example.com',
+            'designation' => 'Professor',
+            'department_id' => null,
+            'subjects' => 'Demo Subject',
+        ]]);
+        return redirect('/faculty/dashboard');
+    }
+
+    if (! $faculty || ! Hash::check($data['password'], $faculty->password)) {
+        return back()->withErrors(['email' => 'Invalid email or password.'])->withInput();
+    }
+
+    session(['faculty.auth' => [
+        'id' => $faculty->id,
+        'name' => $faculty->name,
+        'email' => $faculty->email,
+        'designation' => $faculty->designation,
+        'department_id' => $faculty->department_id,
+        'subjects' => $faculty->subjects,
+    ]]);
+
+    return redirect('/faculty/dashboard');
+});
+
 Route::post('/student/login', function (Request $request) {
     $data = $request->validate([
         'enrollment_number' => 'required|string',
@@ -668,6 +705,82 @@ Route::middleware(['web'])->group(function () {
 
     Route::post('/student/logout', function () {
         session()->forget('student.auth');
+
+        return redirect('/')->with('status', 'You have been logged out.');
+    });
+
+    // Faculty Portal Routes
+    Route::get('/faculty/dashboard', function () {
+        if (! session('faculty.auth')) {
+            return redirect('/')->with('error', 'Please login to continue.');
+        }
+        return view('faculty.dashboard');
+    });
+
+    Route::get('/faculty/timetable', function () {
+        if (! session('faculty.auth')) {
+            return redirect('/')->with('error', 'Please login to continue.');
+        }
+        return view('faculty.timetable');
+    });
+
+    Route::get('/faculty/notifications', function () {
+        if (! session('faculty.auth')) {
+            return redirect('/')->with('error', 'Please login to continue.');
+        }
+
+        $notifications = Notification::whereIn('audience', ['faculty', 'all'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return view('faculty.notifications', ['notifications' => $notifications]);
+    });
+
+    Route::get('/faculty/subjects', function () {
+        if (! session('faculty.auth')) {
+            return redirect('/')->with('error', 'Please login to continue.');
+        }
+
+        $facultyName = session('faculty.auth.name');
+        $subjects = Subject::where('faculty_name', $facultyName)->get();
+
+        return view('faculty.subjects', ['subjects' => $subjects]);
+    });
+
+    Route::get('/faculty/profile/edit', function () {
+        if (! session('faculty.auth')) {
+            return redirect('/')->with('error', 'Please login to continue.');
+        }
+
+        return view('faculty.profile');
+    });
+
+    Route::put('/faculty/profile', function (Request $request) {
+        if (! session('faculty.auth')) {
+            return redirect('/')->with('error', 'Please login to continue.');
+        }
+
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'designation' => 'required|string|max:255',
+            'subjects' => 'nullable|string|max:1000',
+        ]);
+
+        $faculty = Faculty::find(session('faculty.auth.id'));
+        if ($faculty) {
+            $faculty->update($data);
+            session(['faculty.auth' => array_merge(session('faculty.auth'), [
+                'name' => $faculty->name,
+                'designation' => $faculty->designation,
+                'subjects' => $faculty->subjects,
+            ])]);
+        }
+
+        return redirect('/faculty/profile/edit')->with('status', 'Profile updated successfully.');
+    });
+
+    Route::post('/faculty/logout', function () {
+        session()->forget('faculty.auth');
 
         return redirect('/')->with('status', 'You have been logged out.');
     });
