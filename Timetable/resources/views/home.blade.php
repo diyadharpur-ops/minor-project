@@ -3,292 +3,893 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>K. D. Polytechnic | Portal</title>
+    <title>K. D. Polytechnic | Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            color-scheme: light;
-            --bg: #f4f7fb;
-            --panel: #ffffff;
-            --sidebar: #0f3d5e;
-            --sidebar-accent: #1f6f9f;
-            --text: #1f2937;
-            --muted: #6b7280;
-            --border: #dce4ee;
-            --accent: #2563eb;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --navy: #0f172a;
+            --navy-light: #1e293b;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --bg-main: #f8fafc;
+            --bg-card: #ffffff;
+            --border: #e2e8f0;
+            --error: #ef4444;
+            --success: #10b981;
+            --font-main: 'Inter', sans-serif;
         }
 
-        * { box-sizing: border-box; }
-        body {
+        * {
             margin: 0;
-            font-family: Arial, Helvetica, sans-serif;
-            background: linear-gradient(135deg, #eef4ff 0%, #f8fbff 100%);
-            color: var(--text);
+            padding: 0;
+            box-sizing: border-box;
         }
 
-        .page {
+        body {
+            font-family: var(--font-main);
+            background-color: var(--bg-main);
+            color: var(--text-main);
             min-height: 100vh;
             display: flex;
-            padding: 24px;
         }
 
-        .sidebar {
-            width: 320px;
-            background: var(--sidebar);
+        /* Split Layout */
+        .layout-container {
+            display: flex;
+            width: 100%;
+            min-height: 100vh;
+        }
+
+        /* Left Panel */
+        .left-panel {
+            flex: 1;
+            background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
             color: white;
-            border-radius: 20px 0 0 20px;
-            padding: 28px 20px;
-            box-shadow: 0 12px 35px rgba(15, 61, 94, 0.2);
-        }
-
-        .sidebar h1 {
-            margin: 0 0 20px;
-            font-size: 1.5rem;
-            line-height: 1.4;
-        }
-
-        .sidebar-nav {
+            padding: 4rem;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
         }
 
-        .sidebar-nav button {
-            text-align: left;
-            padding: 12px 14px;
-            border-radius: 10px;
-            border: 1px solid transparent;
-            background: rgba(255,255,255,0.12);
+        .left-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle at 20% 80%, rgba(37, 99, 235, 0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(37, 99, 235, 0.1) 0%, transparent 40%);
+            z-index: 1;
+        }
+
+        .left-content {
+            position: relative;
+            z-index: 2;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .college-name {
+            font-size: 1.25rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #94a3b8;
+            margin-bottom: 1rem;
+        }
+
+        .system-title {
+            font-size: 3rem;
+            font-weight: 700;
+            line-height: 1.2;
+            margin-bottom: 3rem;
+            background: linear-gradient(to right, #ffffff, #cbd5e1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .features-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .feature-item {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+            font-size: 1.1rem;
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+
+        .feature-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            color: #60a5fa;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .illustration {
+            margin-top: 4rem;
+            opacity: 0.8;
+            max-width: 80%;
+        }
+
+        /* Right Panel */
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 2rem;
+            background: var(--bg-main);
+            position: relative;
+        }
+
+        .login-wrapper {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 0;
+        }
+
+        .login-card {
+            background: var(--bg-card);
+            width: 100%;
+            max-width: 480px;
+            border-radius: 24px;
+            padding: 3rem;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.04),
+                        0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .sys-icon {
+            width: 56px;
+            height: 56px;
+            background: var(--primary);
             color: white;
-            cursor: pointer;
+            border-radius: 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.2);
+        }
+
+        .login-title {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 0.5rem;
+        }
+
+        .login-subtitle {
+            color: var(--text-muted);
             font-size: 0.95rem;
+        }
+
+        /* Tabs */
+        .role-tabs {
+            display: flex;
+            background: #f1f5f9;
+            padding: 4px;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+        }
+
+        .role-tab {
+            flex: 1;
+            padding: 0.75rem;
+            text-align: center;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.9rem;
+            border-radius: 8px;
+            cursor: pointer;
             transition: all 0.2s ease;
         }
 
-        .sidebar-nav button:hover,
-        .sidebar-nav button.active {
-            background: var(--sidebar-accent);
-            border-color: rgba(255,255,255,0.28);
+        .role-tab:hover {
+            color: var(--text-main);
         }
 
-        .content {
-            flex: 1;
-            background: var(--panel);
-            border-radius: 0 20px 20px 0;
-            padding: 30px;
-            box-shadow: 0 12px 35px rgba(15, 23, 42, 0.08);
+        .role-tab.active {
+            background: var(--bg-card);
+            color: var(--primary);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
 
-        .card {
+        /* Forms */
+        .form-section {
             display: none;
-            max-width: 620px;
+            animation: fadeIn 0.3s ease;
         }
 
-        .card.active {
+        .form-section.active {
             display: block;
         }
 
-        .card h2 {
-            margin: 0 0 8px;
-            font-size: 1.4rem;
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
-        .card p {
-            margin: 0 0 20px;
-            color: var(--muted);
+        .input-group {
+            margin-bottom: 1.25rem;
         }
 
-        .form-grid {
-            display: grid;
-            gap: 14px;
-        }
-
-        .field {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .field label {
+        .input-label {
+            display: block;
+            font-size: 0.875rem;
             font-weight: 600;
-            color: var(--text);
+            color: var(--text-main);
+            margin-bottom: 0.5rem;
         }
 
-        .field input {
-            padding: 11px 12px;
+        .input-wrapper {
+            position: relative;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 0.875rem 1rem;
             border: 1px solid var(--border);
             border-radius: 10px;
             font-size: 0.95rem;
+            color: var(--text-main);
+            transition: all 0.2s ease;
+            background: #fafafa;
         }
 
-        .field input:focus {
-            outline: 2px solid rgba(37, 99, 235, 0.18);
-            border-color: var(--accent);
+        .input-field:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: #fff;
+            box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
         }
 
-        .actions {
-            margin-top: 8px;
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
         }
 
-        .actions button {
-            padding: 10px 16px;
+        .password-toggle:hover {
+            color: var(--text-main);
+        }
+
+        .form-options {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            font-size: 0.875rem;
+        }
+
+        .remember-me {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+        .remember-me input {
+            accent-color: var(--primary);
+            width: 16px;
+            height: 16px;
+        }
+
+        .forgot-password {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .forgot-password:hover {
+            text-decoration: underline;
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 0.875rem;
+            background: var(--primary);
+            color: white;
             border: none;
             border-radius: 10px;
-            background: var(--accent);
-            color: white;
+            font-size: 1rem;
+            font-weight: 600;
             cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+        }
+
+        .btn-primary.loading {
+            color: transparent;
+        }
+
+        .btn-primary.loading::after {
+            content: "";
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            top: 50%;
+            left: 50%;
+            margin: -10px 0 0 -10px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s infinite linear;
+        }
+
+        .divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 2rem 0;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .divider::before { margin-right: .75rem; }
+        .divider::after { margin-left: .75rem; }
+
+        .btn-google {
+            width: 100%;
+            padding: 0.875rem;
+            background: white;
+            color: var(--text-main);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn-google:hover {
+            background: #f8fafc;
+            border-color: #cbd5e1;
+        }
+
+        .register-link {
+            text-align: center;
+            margin-top: 1.5rem;
+            font-size: 0.95rem;
+            color: var(--text-muted);
+        }
+
+        .register-link a {
+            color: var(--primary);
+            text-decoration: none;
             font-weight: 600;
         }
 
-        @media (max-width: 900px) {
-            .page { flex-direction: column; padding: 16px; }
-            .sidebar, .content { border-radius: 20px; }
-            .sidebar { width: 100%; margin-bottom: 12px; }
-            .content { padding: 20px; }
+        .register-link a:hover {
+            text-decoration: underline;
+        }
+
+        /* Default Credentials Box */
+        .default-credentials {
+            margin-top: 2rem;
+            padding: 1.25rem;
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            font-size: 0.85rem;
+        }
+
+        .default-credentials-title {
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .cred-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: white;
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            border: 1px solid var(--border);
+        }
+
+        .cred-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .cred-label {
+            color: var(--text-muted);
+            margin-right: 0.5rem;
+        }
+
+        .cred-value {
+            font-family: monospace;
+            font-weight: 600;
+            color: var(--navy);
+            font-size: 0.9rem;
+        }
+
+        .btn-copy {
+            background: #f1f5f9;
+            border: 1px solid transparent;
+            color: var(--primary);
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .btn-copy:hover {
+            background: #e2e8f0;
+            border-color: #cbd5e1;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 1rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* Alerts */
+        .alert {
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .alert-success {
+            background: #ecfdf5;
+            color: #065f46;
+            border: 1px solid #a7f3d0;
+        }
+        
+        .alert-error {
+            background: #fef2f2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .left-panel {
+                padding: 3rem;
+            }
+            .system-title {
+                font-size: 2.5rem;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .layout-container {
+                flex-direction: column;
+            }
+            .left-panel {
+                flex: none;
+                padding: 3rem 2rem;
+            }
+            .system-title {
+                font-size: 2rem;
+                margin-bottom: 2rem;
+            }
+            .right-panel {
+                padding: 1.5rem;
+            }
+            .login-card {
+                padding: 2rem;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="page">
-        <aside class="sidebar">
-            <h1>WELCOME TO K. D. POLYTECHNIC, PATAN</h1>
-            <nav class="sidebar-nav" aria-label="Portal options">
-                <button class="active" data-target="admin">Admin Login</button>
-                <button data-target="faculty">Faculty Login</button>
-                <button data-target="student-login">Student Login</button>
-                <button data-target="student-register">Student Register</button>
-            </nav>
-        </aside>
+    <div class="layout-container">
+        <!-- Left Panel -->
+        <div class="left-panel">
+            <div class="left-content">
+                <div class="college-name">K. D. Polytechnic, Patan</div>
+                <h1 class="system-title">AI College Timetable Management System</h1>
+                
+                <ul class="features-list">
+                    <li class="feature-item">
+                        <div class="feature-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                        </div>
+                        Automated Timetable Generation
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                        </div>
+                        Smart Faculty & Classroom Management
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                        </div>
+                        Real-time Notifications
+                    </li>
+                </ul>
+            </div>
+        </div>
 
-        <main class="content">
-            @if(session('status'))
-                <div style="margin-bottom: 18px; padding: 14px 16px; border-radius: 12px; background: #e6f9f2; color: #0a5a34; border: 1px solid #8ae3b8;">
-                    {{ session('status') }}
+        <!-- Right Panel -->
+        <div class="right-panel">
+            <div class="login-wrapper">
+                <div class="login-card">
+                    <div class="login-header">
+                        <div class="sys-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                        </div>
+                        <h2 class="login-title">Welcome Back!</h2>
+                        <p class="login-subtitle">Sign in to continue to your account</p>
+                    </div>
+
+                    @if(session('status'))
+                        <div class="alert alert-success">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                            {{ session('status') }}
+                        </div>
+                    @endif
+                    @if(session('error'))
+                        <div class="alert alert-error">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                            {{ session('error') }}
+                        </div>
+                    @endif
+
+                    <!-- Tabs -->
+                    <div class="role-tabs">
+                        <button class="role-tab active" data-target="admin-login">Admin</button>
+                        <button class="role-tab" data-target="faculty-login">Faculty</button>
+                        <button class="role-tab" data-target="student-login">Student</button>
+                    </div>
+
+                    <!-- Admin Login -->
+                    <form id="admin-login" class="form-section active" method="POST" action="/admin/login" onsubmit="return showLoading(this)">
+                        @csrf
+                        <div class="input-group">
+                            <label class="input-label" for="admin-email">Email Address</label>
+                            <div class="input-wrapper">
+                                <input id="admin-email" name="email" type="text" class="input-field" value="{{ old('email', 'admin@example.com') }}" placeholder="Enter your email" required>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label" for="admin-password">Password</label>
+                            <div class="input-wrapper">
+                                <input id="admin-password" name="password" type="password" class="input-field" value="admin" placeholder="Enter your password" required>
+                                <button type="button" class="password-toggle" onclick="togglePassword('admin-password')">
+                                    <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                    <svg class="eye-off-icon" style="display:none;" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-options">
+                            <label class="remember-me">
+                                <input type="checkbox" name="remember"> Remember me
+                            </label>
+                            <a href="#" class="forgot-password">Forgot Password?</a>
+                        </div>
+                        <button type="submit" class="btn-primary">Login to Account</button>
+                    </form>
+
+                    <!-- Faculty Login -->
+                    <form id="faculty-login" class="form-section" method="POST" action="/faculty/login" onsubmit="return showLoading(this)">
+                        @csrf
+                        <div class="input-group">
+                            <label class="input-label" for="faculty-email">Email Address</label>
+                            <div class="input-wrapper">
+                                <input id="faculty-email" name="email" type="text" class="input-field" value="{{ old('email', 'faculty@example.com') }}" placeholder="Enter your email" required>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label" for="faculty-password">Password</label>
+                            <div class="input-wrapper">
+                                <input id="faculty-password" name="password" type="password" class="input-field" value="password" placeholder="Enter your password" required>
+                                <button type="button" class="password-toggle" onclick="togglePassword('faculty-password')">
+                                    <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                    <svg class="eye-off-icon" style="display:none;" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-options">
+                            <label class="remember-me">
+                                <input type="checkbox" name="remember"> Remember me
+                            </label>
+                            <a href="#" class="forgot-password">Forgot Password?</a>
+                        </div>
+                        <button type="submit" class="btn-primary">Login to Account</button>
+                    </form>
+
+                    <!-- Student Login -->
+                    <form id="student-login" class="form-section" method="POST" action="/student/login" onsubmit="return showLoading(this)">
+                        @csrf
+                        <div class="input-group">
+                            <label class="input-label" for="student-enrollment">Enrollment Number</label>
+                            <div class="input-wrapper">
+                                <input id="student-enrollment" name="enrollment_number" type="text" class="input-field" value="{{ old('enrollment_number') }}" placeholder="Enter your enrollment number" required>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label" for="student-password">Password</label>
+                            <div class="input-wrapper">
+                                <input id="student-password" name="password" type="password" class="input-field" placeholder="Enter your password" required>
+                                <button type="button" class="password-toggle" onclick="togglePassword('student-password')">
+                                    <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                    <svg class="eye-off-icon" style="display:none;" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-options">
+                            <label class="remember-me">
+                                <input type="checkbox" name="remember"> Remember me
+                            </label>
+                            <a href="#" class="forgot-password">Forgot Password?</a>
+                        </div>
+                        <button type="submit" class="btn-primary">Login to Account</button>
+                    </form>
+
+                    <!-- Student Register -->
+                    <form id="student-register" class="form-section" method="POST" action="/student/register" onsubmit="return showLoading(this)">
+                        @csrf
+                        <div class="input-group">
+                            <label class="input-label" for="reg-enrollment">Enrollment Number</label>
+                            <input id="reg-enrollment" name="enrollment_number" type="text" class="input-field" value="{{ old('enrollment_number') }}" placeholder="Enrollment Number" required>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label" for="reg-name">Student Name</label>
+                            <input id="reg-name" name="name" type="text" class="input-field" value="{{ old('name') }}" placeholder="Full Name" required>
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
+                            <div class="input-group" style="margin-bottom: 0;">
+                                <label class="input-label" for="reg-department">Department</label>
+                                <input id="reg-department" name="department" type="text" class="input-field" value="{{ old('department') }}" placeholder="e.g. CE">
+                            </div>
+                            <div class="input-group" style="margin-bottom: 0;">
+                                <label class="input-label" for="reg-semester">Semester</label>
+                                <input id="reg-semester" name="semester" type="text" class="input-field" value="{{ old('semester') }}" placeholder="e.g. 5">
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
+                            <div class="input-group" style="margin-bottom: 0;">
+                                <label class="input-label" for="reg-class">Class</label>
+                                <input id="reg-class" name="student_class" type="text" class="input-field" value="{{ old('student_class') }}" placeholder="e.g. CE-A">
+                            </div>
+                            <div class="input-group" style="margin-bottom: 0;">
+                                <label class="input-label" for="reg-divcon">DivCon</label>
+                                <input id="reg-divcon" name="divcon" type="text" class="input-field" value="{{ old('divcon') }}" placeholder="e.g. 1">
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <label class="input-label" for="reg-password">Password</label>
+                            <div class="input-wrapper">
+                                <input id="reg-password" name="password" type="password" class="input-field" placeholder="Create a password" required>
+                                <button type="button" class="password-toggle" onclick="togglePassword('reg-password')">
+                                    <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                    <svg class="eye-off-icon" style="display:none;" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label" for="reg-password-confirm">Confirm Password</label>
+                            <input id="reg-password-confirm" name="password_confirmation" type="password" class="input-field" placeholder="Confirm password" required>
+                        </div>
+                        <button type="submit" class="btn-primary">Create Account</button>
+                    </form>
+
+                    <div id="social-login-section">
+                        <div class="divider">or</div>
+                        
+                        <button class="btn-google">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 48 48">
+                                <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/>
+                                <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/>
+                                <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/>
+                                <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/>
+                            </svg>
+                            Login with Google
+                        </button>
+                    </div>
+
+                    <div class="register-link" id="register-toggle-section">
+                        New here? <a href="#" id="toggle-register">Register as Student</a>
+                    </div>
+                    
+                    <div class="register-link" id="login-toggle-section" style="display: none;">
+                        Already have an account? <a href="#" id="toggle-login">Back to Login</a>
+                    </div>
+
+                    <div class="default-credentials" id="default-credentials-box">
+                        <div class="default-credentials-title">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                            Default Login Credentials
+                        </div>
+                        <div class="cred-item">
+                            <div><span class="cred-label">Email:</span> <span class="cred-value" id="def-email">kdp@631</span></div>
+                            <button type="button" class="btn-copy" onclick="copyText('def-email')" title="Copy Email">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                            </button>
+                        </div>
+                        <div class="cred-item">
+                            <div><span class="cred-label">Password:</span> <span class="cred-value" id="def-pass">kdp@12345</span></div>
+                            <button type="button" class="btn-copy" onclick="copyText('def-pass')" title="Copy Password">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                            </button>
+                        </div>
+                    </div>
                 </div>
-            @endif
-            @if(session('error'))
-                <div style="margin-bottom: 18px; padding: 14px 16px; border-radius: 12px; background: #ffeced; color: #8b252d; border: 1px solid #f5a4a6;">
-                    {{ session('error') }}
-                </div>
-            @endif
-            <section id="admin" class="card active">
-                <h2>Admin Login</h2>
-                <p>Enter your admin credentials to continue.</p>
-                <form class="form-grid" method="POST" action="/admin/login">
-                    @csrf
-                    <div class="field">
-                        <label for="admin-email">Admin Email</label>
-                        <input id="admin-email" name="email" type="email" value="admin@example.com" placeholder="admin@example.com" required>
-                    </div>
-                    <div class="field">
-                        <label for="admin-password">Password</label>
-                        <input id="admin-password" name="password" type="password" value="admin" placeholder="Enter password" required>
-                    </div>
-                    <div class="actions">
-                        <button type="submit">Login</button>
-                    </div>
-                </form>
-            </section>
-
-            <section id="faculty" class="card">
-                <h2>Faculty Login</h2>
-                <p>Enter your faculty email and password.</p>
-                <form class="form-grid" action="/faculty/login" method="POST">
-                    @csrf
-                    <div class="field">
-                        <label for="faculty-email">Faculty Email</label>
-                        <input id="faculty-email" name="email" type="email" placeholder="faculty@example.com" value="{{ old('email', 'faculty@example.com') }}" required>
-                    </div>
-                    <div class="field">
-                        <label for="faculty-password">Password</label>
-                        <input id="faculty-password" name="password" type="password" placeholder="Enter password" value="password" required>
-                    </div>
-                    <div class="actions">
-                        <button type="submit">Login</button>
-                    </div>
-                </form>
-            </section>
-
-            <section id="student-login" class="card">
-                <h2>Student Login</h2>
-                <p>Use your enrollment number and password to sign in.</p>
-                <form class="form-grid" action="/student/login" method="POST">
-                    @csrf
-                    <div class="field">
-                        <label for="student-enrollment">Student Enrollment Number</label>
-                        <input id="student-enrollment" name="enrollment_number" type="text" placeholder="Enrollment Number" value="{{ old('enrollment_number') }}" required>
-                    </div>
-                    <div class="field">
-                        <label for="student-password">Password</label>
-                        <input id="student-password" name="password" type="password" placeholder="Enter password" required>
-                    </div>
-                    <div class="actions">
-                        <button type="submit">Login</button>
-                    </div>
-                </form>
-            </section>
-
-            <section id="student-register" class="card">
-                <h2>Student Register</h2>
-                <p>Create a new student account with your details.</p>
-                <form class="form-grid" action="/student/register" method="POST">
-                    @csrf
-                    <div class="field">
-                        <label for="reg-enrollment">Student Enrollment Number</label>
-                        <input id="reg-enrollment" name="enrollment_number" type="text" placeholder="Enrollment Number" value="{{ old('enrollment_number') }}" required>
-                    </div>
-                    <div class="field">
-                        <label for="reg-name">Student Name</label>
-                        <input id="reg-name" name="name" type="text" placeholder="Student Name" value="{{ old('name') }}" required>
-                    </div>
-                    <div class="field">
-                        <label for="reg-department">Department</label>
-                        <input id="reg-department" name="department" type="text" placeholder="Department" value="{{ old('department') }}">
-                    </div>
-                    <div class="field">
-                        <label for="reg-semester">Semester</label>
-                        <input id="reg-semester" name="semester" type="text" placeholder="Semester" value="{{ old('semester') }}">
-                    </div>
-                    <div class="field">
-                        <label for="reg-class">Class</label>
-                        <input id="reg-class" name="student_class" type="text" placeholder="Class" value="{{ old('student_class') }}">
-                    </div>
-                    <div class="field">
-                        <label for="reg-divcon">DivCon</label>
-                        <input id="reg-divcon" name="divcon" type="text" placeholder="DivCon" value="{{ old('divcon') }}">
-                    </div>
-                    <div class="field">
-                        <label for="reg-password">Password</label>
-                        <input id="reg-password" name="password" type="password" placeholder="Enter password" required>
-                    </div>
-                    <div class="field">
-                        <label for="reg-password-confirm">Confirm Password</label>
-                        <input id="reg-password-confirm" name="password_confirmation" type="password" placeholder="Confirm password" required>
-                    </div>
-                    <div class="actions">
-                        <button type="submit">Register</button>
-                    </div>
-                </form>
-            </section>
-        </main>
+            </div>
+            <div class="footer">
+                &copy; 2026 K. D. Polytechnic, Patan. All rights reserved.
+            </div>
+        </div>
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const buttons = document.querySelectorAll('.sidebar-nav button');
-            const cards = document.querySelectorAll('.card');
+        // Tab switching logic
+        const tabs = document.querySelectorAll('.role-tab');
+        const forms = document.querySelectorAll('.form-section');
+        const defaultCredsBox = document.getElementById('default-credentials-box');
+        
+        // Sections to hide when registering
+        const socialLoginSection = document.getElementById('social-login-section');
+        const registerToggleSection = document.getElementById('register-toggle-section');
+        const loginToggleSection = document.getElementById('login-toggle-section');
+        const roleTabsContainer = document.querySelector('.role-tabs');
+        const loginTitle = document.querySelector('.login-title');
+        const loginSubtitle = document.querySelector('.login-subtitle');
 
-            buttons.forEach(function (button) {
-                button.addEventListener('click', function () {
-                    buttons.forEach(function (btn) { btn.classList.remove('active'); });
-                    this.classList.add('active');
-
-                    const target = this.getAttribute('data-target');
-                    cards.forEach(function (card) {
-                        card.classList.toggle('active', card.id === target);
-                    });
-                });
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active from all tabs & forms
+                tabs.forEach(t => t.classList.remove('active'));
+                forms.forEach(f => f.classList.remove('active'));
+                
+                // Add active to clicked tab
+                tab.classList.add('active');
+                
+                // Show corresponding form
+                const targetId = tab.getAttribute('data-target');
+                document.getElementById(targetId).classList.add('active');
             });
         });
+
+        // Toggle Register / Login
+        document.getElementById('toggle-register').addEventListener('click', (e) => {
+            e.preventDefault();
+            forms.forEach(f => f.classList.remove('active'));
+            document.getElementById('student-register').classList.add('active');
+            
+            roleTabsContainer.style.display = 'none';
+            socialLoginSection.style.display = 'none';
+            registerToggleSection.style.display = 'none';
+            defaultCredsBox.style.display = 'none';
+            loginToggleSection.style.display = 'block';
+            
+            loginTitle.textContent = "Create an Account";
+            loginSubtitle.textContent = "Register as a new student";
+        });
+
+        document.getElementById('toggle-login').addEventListener('click', (e) => {
+            e.preventDefault();
+            
+            forms.forEach(f => f.classList.remove('active'));
+            document.querySelector('.role-tab.active').click();
+            
+            roleTabsContainer.style.display = 'flex';
+            socialLoginSection.style.display = 'block';
+            registerToggleSection.style.display = 'block';
+            defaultCredsBox.style.display = 'block';
+            loginToggleSection.style.display = 'none';
+            
+            loginTitle.textContent = "Welcome Back!";
+            loginSubtitle.textContent = "Sign in to continue to your account";
+        });
+
+        // Password Toggle
+        function togglePassword(inputId) {
+            const input = document.getElementById(inputId);
+            const btn = input.nextElementSibling;
+            const eyeIcon = btn.querySelector('.eye-icon');
+            const eyeOffIcon = btn.querySelector('.eye-off-icon');
+
+            if (input.type === 'password') {
+                input.type = 'text';
+                eyeIcon.style.display = 'none';
+                eyeOffIcon.style.display = 'block';
+            } else {
+                input.type = 'password';
+                eyeIcon.style.display = 'block';
+                eyeOffIcon.style.display = 'none';
+            }
+        }
+
+        // Copy Text
+        function copyText(elementId) {
+            const text = document.getElementById(elementId).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.querySelector(`[onclick="copyText('${elementId}')"]`);
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                }, 2000);
+            });
+        }
+
+        // Loading State
+        function showLoading(form) {
+            const btn = form.querySelector('button[type="submit"]');
+            btn.classList.add('loading');
+            return true;
+        }
+
+        // Handle validation errors switching to register tab if needed
+        @if(old('name') || $errors->has('name'))
+            document.getElementById('toggle-register').click();
+        @endif
+        @if(old('enrollment_number') && !old('email') && !old('name'))
+            document.querySelector('[data-target="student-login"]').click();
+        @endif
     </script>
 </body>
 </html>
