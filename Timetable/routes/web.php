@@ -740,22 +740,13 @@ Route::post('/faculty/login', function (Request $request) {
         'password' => 'required|string',
     ]);
 
-    $faculty = Faculty::where('email', $data['email'])->first();
+    $faculty = Faculty::with('department')->where('email', $data['email'])->first();
 
-    // Fallback for default testing credentials
-    if ($data['email'] === 'faculty@example.com' && $data['password'] === 'password' && !$faculty) {
-        session(['faculty.auth' => [
-            'id' => 999,
-            'name' => 'Demo Faculty',
-            'email' => 'faculty@example.com',
-            'designation' => 'Professor',
-            'department_id' => null,
-            'subjects' => 'Demo Subject',
-        ]]);
-        return redirect('/faculty/dashboard');
+    if (! $faculty) {
+        return back()->withErrors(['email' => 'Faculty account not found.'])->withInput();
     }
 
-    if (! $faculty || ! Hash::check($data['password'], $faculty->password)) {
+    if (! Hash::check($data['password'], $faculty->password)) {
         return back()->withErrors(['email' => 'Invalid email or password.'])->withInput();
     }
 
@@ -765,6 +756,7 @@ Route::post('/faculty/login', function (Request $request) {
         'email' => $faculty->email,
         'designation' => $faculty->designation,
         'department_id' => $faculty->department_id,
+        'department_name' => $faculty->department ? $faculty->department->name : 'N/A',
         'subjects' => $faculty->subjects,
     ]]);
 
