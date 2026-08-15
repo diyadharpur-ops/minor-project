@@ -906,6 +906,262 @@ Route::post('/admin/classrooms/{id}/delete', function ($id) {
     return redirect('/admin/classrooms');
 });
 
+Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $rooms = Classroom::with('department')
+        ->when($request->filled('room_search'), function ($query) use ($request) {
+            $search = trim($request->input('room_search'));
+            return $query->where(function ($q) use ($search) {
+                $q->where('room_number', 'like', "%{$search}%")
+                    ->orWhere('room_name', 'like', "%{$search}%")
+                    ->orWhere('room_type', 'like', "%{$search}%")
+                    ->orWhere('facilities', 'like', "%{$search}%")
+                    ->orWhere('availability', 'like', "%{$search}%");
+            });
+        })
+        ->when($request->filled('room_type_filter'), function ($query) use ($request) {
+            return $query->where('room_type', $request->input('room_type_filter'));
+        })
+        ->when($request->filled('room_department_filter'), function ($query) use ($request) {
+            return $query->where('department_id', $request->input('room_department_filter'));
+        })
+        ->orderBy('room_number')
+        ->get();
+
+    $departments = Department::orderBy('name')->get();
+    $subjects = Subject::with('department')->orderBy('name')->get();
+    $faculties = Faculty::with('department')->orderBy('name')->get();
+    $allocations = \App\Models\RoomAllocation::with(['department', 'subject', 'faculty', 'classroom'])
+        ->orderBy('day')
+        ->orderBy('start_time')
+        ->get();
+
+    $suitableRooms = collect();
+    $allocationStatus = null;
+    $roomStatus = null;
+
+    if ($request->isMethod('post')) {
+        if ($request->input('form_type') === 'save-room') {
+            $data = $request->validate([
+                'room_number' => 'required|string|max:100|unique:classrooms,room_number',
+                'room_name' => 'required|string|max:150',
+                'room_type' => 'required|string|in:Classroom,Computer Lab,Electrical Lab,Mechanical Lab,Civil Lab,Other Lab',
+                'room_capacity' => 'required|integer|min:1',
+                'facilities' => 'nullable|string|max:255',
+                'department_id' => 'required|integer|exists:departments,id',
+                'availability' => 'required|string|in:Available,Occupied,Maintenance',
+            ]);
+
+            Classroom::create([
+                'room_number' => trim($data['room_number']),
+                'room_name' => trim($data['room_name']),
+                'room_type' => $data['room_type'],
+                'room_capacity' => (int) $data['room_capacity'],
+                'facilities' => trim((string) ($data['facilities'] ?? '')),
+                'department_id' => $data['department_id'],
+                'availability' => $data['availability'],
+            ]);
+
+            $roomStatus = 'Room saved successfully.';
+            return redirect('/admin/classroom-allocation')->with('room_status', $roomStatus);
+        }
+
+        if ($request->input('form_type') === 'find-room') {
+            $allocationData = $request->validate([
+                'department_id' => 'required|integer|exists:departments,id',
+                'semester' => 'required|string|max:50',
+                'subject_id' => 'required|integer|exists:subjects,id',
+                'faculty_id' => 'required|integer|exists:faculties,id',
+                'class_name' => 'required|string|max:100',
+                'student_count' => 'required|integer|min:1',
+                'day' => 'required|string|max:50',
+                'start_time' => 'required|date_format:H:i',
+                'end_time' => 'required|date_format:H:i|after:start_time',
+            ]);
+
+            $subject = Subject::findOrFail($allocationData['subject_id']);
+            $suitableRooms = Classroom::where('department_id', $allocationData['department_id'])
+                ->where('availability', 'Available')
+                ->where('room_capacity', '>=', (int) $allocationData['student_count'])
+                ->when(str_contains(strtolower($subject->name), 'lab') || strtolower((string) $subject->subject_type ?? '') === 'lab', function ($query) {
+                    $query->whereIn('room_type', ['Computer Lab', 'Electrical Lab', 'Mechanical Lab', 'Civil Lab', 'Other Lab']);
+                }, function ($query) {
+                    $query->whereIn('room_type', ['Classroom', 'Computer Lab', 'Electrical Lab', 'Mechanical Lab', 'Civil Lab', 'Other Lab']);
+                })
+                ->orderBy('room_number')
+                ->get();
+
+            $suitableRooms = $suitableRooms->filter(function ($room) use ($allocationData) {
+                $conflict = \App\Models\RoomAllocation::where('classroom_id', $room->id)
+                    ->where('day', $allocationData['day'])
+                    ->where('status', '!=', 'Cancelled')
+                    ->where(function ($query) use ($allocationData) {
+                        $query->where('start_time', '<', $allocationData['end_time'])
+                            ->where('end_time', '>', $allocationData['start_time']);
+                    })
+                    ->exists();
+
+                return ! $conflict;
+            });
+        }
+
+        if ($request->input('form_type') === 'save-allocation') {
+            $allocationData = $request->validate([
+                'department_id' => 'required|integer|exists:departments,id',
+                'semester' => 'required|string|max:50',
+                'subject_id' => 'required|integer|exists:subjects,id',
+                'faculty_id' => 'required|integer|exists:faculties,id',
+                'class_name' => 'required|string|max:100',
+                'student_count' => 'required|integer|min:1',
+                'day' => 'required|string|max:50',
+                'start_time' => 'required|date_format:H:i',
+                'end_time' => 'required|date_format:H:i|after:start_time',
+                'room_id' => 'required|integer|exists:classrooms,id',
+            ]);
+
+            $room = Classroom::findOrFail($allocationData['room_id']);
+
+            if ((int) $room->room_capacity < (int) $allocationData['student_count']) {
+                return back()->withErrors(['student_count' => 'Selected room capacity is lower than the student count.'])->withInput();
+            }
+
+            if ($room->availability !== 'Available') {
+                return back()->withErrors(['room_id' => 'Selected room is not available for this time.'])->withInput();
+            }
+
+            $conflict = \App\Models\RoomAllocation::where('classroom_id', $room->id)
+                ->where('day', $allocationData['day'])
+                ->where('status', '!=', 'Cancelled')
+                ->where(function ($query) use ($allocationData) {
+                    $query->where('start_time', '<', $allocationData['end_time'])
+                        ->where('end_time', '>', $allocationData['start_time']);
+                })
+                ->exists();
+
+            if ($conflict) {
+                return back()->withErrors(['day' => 'This room has a time conflict for the selected day and time.'])->withInput();
+            }
+
+            $allocation = \App\Models\RoomAllocation::create([
+                'department_id' => $allocationData['department_id'],
+                'semester' => $allocationData['semester'],
+                'subject_id' => $allocationData['subject_id'],
+                'faculty_id' => $allocationData['faculty_id'],
+                'classroom_id' => $room->id,
+                'class_name' => $allocationData['class_name'],
+                'student_count' => (int) $allocationData['student_count'],
+                'day' => $allocationData['day'],
+                'start_time' => $allocationData['start_time'],
+                'end_time' => $allocationData['end_time'],
+                'status' => 'Allocated',
+            ]);
+
+            $allocationStatus = 'Allocation saved successfully.';
+            return redirect('/admin/classroom-allocation')->with('allocation_status', $allocationStatus);
+        }
+    }
+
+    return view('admin.classrooms.allocation', [
+        'rooms' => $rooms,
+        'departments' => $departments,
+        'subjects' => $subjects,
+        'faculties' => $faculties,
+        'allocations' => $allocations,
+        'suitableRooms' => $suitableRooms,
+        'room_status' => $roomStatus,
+        'allocation_status' => $allocationStatus,
+        'roomSearch' => $request->input('room_search'),
+        'roomTypeFilter' => $request->input('room_type_filter'),
+        'roomDepartmentFilter' => $request->input('room_department_filter'),
+    ]);
+});
+
+Route::post('/admin/classroom-allocation/{id}/delete-room', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $room = Classroom::find($id);
+    if ($room) {
+        $room->delete();
+    }
+
+    return redirect('/admin/classroom-allocation')->with('room_status', 'Room deleted successfully.');
+});
+
+Route::get('/admin/classroom-allocation/{id}/edit-allocation', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $allocation = \App\Models\RoomAllocation::with(['department', 'subject', 'faculty', 'classroom'])->findOrFail($id);
+
+    return view('admin.classrooms.allocation-edit', [
+        'allocation' => $allocation,
+        'departments' => Department::orderBy('name')->get(),
+        'subjects' => Subject::orderBy('name')->get(),
+        'faculties' => Faculty::orderBy('name')->get(),
+        'rooms' => Classroom::orderBy('room_number')->get(),
+    ]);
+});
+
+Route::post('/admin/classroom-allocation/{id}/update-allocation', function (Request $request, $id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $allocation = \App\Models\RoomAllocation::findOrFail($id);
+
+    $data = $request->validate([
+        'department_id' => 'required|integer|exists:departments,id',
+        'semester' => 'required|string|max:50',
+        'subject_id' => 'required|integer|exists:subjects,id',
+        'faculty_id' => 'required|integer|exists:faculties,id',
+        'class_name' => 'required|string|max:100',
+        'student_count' => 'required|integer|min:1',
+        'day' => 'required|string|max:50',
+        'start_time' => 'required|date_format:H:i',
+        'end_time' => 'required|date_format:H:i|after:start_time',
+        'room_id' => 'required|integer|exists:classrooms,id',
+    ]);
+
+    $room = Classroom::findOrFail($data['room_id']);
+    if ((int) $room->room_capacity < (int) $data['student_count']) {
+        return back()->withErrors(['student_count' => 'Selected room capacity is lower than the student count.'])->withInput();
+    }
+
+    $allocation->update([
+        'department_id' => $data['department_id'],
+        'semester' => $data['semester'],
+        'subject_id' => $data['subject_id'],
+        'faculty_id' => $data['faculty_id'],
+        'classroom_id' => $room->id,
+        'class_name' => $data['class_name'],
+        'student_count' => (int) $data['student_count'],
+        'day' => $data['day'],
+        'start_time' => $data['start_time'],
+        'end_time' => $data['end_time'],
+    ]);
+
+    return redirect('/admin/classroom-allocation')->with('allocation_status', 'Allocation updated successfully.');
+});
+
+Route::post('/admin/classroom-allocation/{id}/delete-allocation', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $allocation = \App\Models\RoomAllocation::find($id);
+    if ($allocation) {
+        $allocation->delete();
+    }
+
+    return redirect('/admin/classroom-allocation')->with('allocation_status', 'Allocation deleted successfully.');
+});
+
 Route::post('/admin/logout', function () {
     session()->forget('admin.auth');
 

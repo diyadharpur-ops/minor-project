@@ -85,6 +85,7 @@
             <a href="/admin/students" class="sidebar-link {{ request()->is('admin/students*') ? 'active' : '' }}">Manage Students</a>
             <a href="/admin/subjects" class="sidebar-link {{ request()->is('admin/subjects*') ? 'active' : '' }}">Manage Subjects</a>
             <a href="/admin/classrooms" class="sidebar-link {{ request()->is('admin/classrooms*') ? 'active' : '' }}">Manage Classrooms</a>
+            <a href="/admin/classroom-allocation" class="sidebar-link {{ request()->is('admin/classroom-allocation*') ? 'active' : '' }}">Classroom &amp; Lab Allocation</a>
             <a href="/admin/notifications" class="sidebar-link {{ request()->is('admin/notifications*') ? 'active' : '' }}">Notification Management</a>
             <a href="/admin/timetable" class="sidebar-link {{ request()->is('admin/timetable*') ? 'active' : '' }}">Generate Timetable</a>
             <a href="/admin/reports" class="sidebar-link {{ request()->is('admin/reports*') ? 'active' : '' }}">Reports</a>
