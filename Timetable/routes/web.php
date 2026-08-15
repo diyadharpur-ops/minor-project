@@ -703,35 +703,26 @@ Route::post('/student/register', function (Request $request) {
     $data = $request->validate([
         'enrollment_number' => 'required|string|max:255|unique:users,enrollment_number',
         'name' => 'required|string|max:255',
-        'department' => 'nullable|string|max:255',
-        'semester' => 'nullable|string|max:255',
+        'email' => 'required|email|max:255|unique:users,email',
+        'department' => 'required|string|max:255',
+        'semester' => 'required|string|max:255',
         'student_class' => 'nullable|string|max:255',
         'divcon' => 'nullable|string|max:255',
-        'password' => 'required|string|confirmed|min:8',
+        'password' => 'required|string|min:8|confirmed',
     ]);
 
-    $user = User::create([
+    User::create([
         'name' => $data['name'],
         'enrollment_number' => $data['enrollment_number'],
-        'email' => $data['enrollment_number'].'@student.local',
-        'department' => $data['department'] ?? null,
-        'semester' => $data['semester'] ?? null,
+        'email' => $data['email'],
+        'department' => $data['department'],
+        'semester' => $data['semester'],
         'student_class' => $data['student_class'] ?? null,
         'divcon' => $data['divcon'] ?? null,
         'password' => Hash::make($data['password']),
     ]);
 
-    session(['student.auth' => [
-        'id' => $user->id,
-        'name' => $user->name,
-        'enrollment_number' => $user->enrollment_number,
-        'department' => $user->department,
-        'semester' => $user->semester,
-        'student_class' => $user->student_class,
-        'divcon' => $user->divcon,
-    ]]);
-
-    return redirect('/student/dashboard')->with('status', 'Successfully registered.');
+    return redirect('/')->with('student_register_success', '✓ Registration Successful! Your student account has been created successfully. You can now login using your Enrollment Number and Password.');
 });
 
 Route::post('/faculty/login', function (Request $request) {
@@ -769,9 +760,13 @@ Route::post('/student/login', function (Request $request) {
         'password' => 'required|string',
     ]);
 
-    $user = User::where('enrollment_number', $data['enrollment_number'])->first();
+    $user = User::where('enrollment_number', trim($data['enrollment_number']))->first();
 
-    if (! $user || ! Hash::check($data['password'], $user->password)) {
+    if (! $user) {
+        return back()->withErrors(['enrollment_number' => 'Student account not found.'])->withInput();
+    }
+
+    if (! Hash::check($data['password'], $user->password)) {
         return back()->withErrors(['enrollment_number' => 'Invalid enrollment number or password.'])->withInput();
     }
 
@@ -789,12 +784,60 @@ Route::post('/student/login', function (Request $request) {
 });
 
 Route::middleware(['web'])->group(function () {
+    Route::get('/admin/students', function (Request $request) {
+        if (! session('admin.auth')) {
+            return redirect('/admin/login');
+        }
+
+        $q = $request->input('q');
+        $query = User::query();
+
+        if ($q) {
+            $query->where('name', 'like', "%{$q}%")
+                ->orWhere('email', 'like', "%{$q}%")
+                ->orWhere('enrollment_number', 'like', "%{$q}%")
+                ->orWhere('department', 'like', "%{$q}%");
+        }
+
+        $students = $query->orderBy('created_at', 'desc')->get();
+
+        return view('admin.students.index', ['students' => $students, 'q' => $q]);
+    });
+
+    Route::post('/admin/students/{id}/delete', function ($id) {
+        if (! session('admin.auth')) {
+            return redirect('/admin/login');
+        }
+
+        $student = User::find($id);
+
+        if (! $student) {
+            return back()->with('error', 'Unable to delete student. Please try again.');
+        }
+
+        try {
+            $student->delete();
+
+            return redirect('/admin/students')->with('status', 'Student deleted successfully.');
+        } catch (\Throwable $e) {
+            return back()->with('error', 'Unable to delete student. Please try again.');
+        }
+    });
+
     Route::get('/student/dashboard', function () {
         if (! session('student.auth')) {
             return redirect('/')->with('error', 'Please login to continue.');
         }
 
-        return view('student.dashboard');
+        $student = User::find(session('student.auth.id'));
+
+        if (! $student) {
+            session()->forget('student.auth');
+
+            return redirect('/')->with('error', 'Student session expired. Please login again.');
+        }
+
+        return view('student.dashboard', compact('student'));
     });
 
     Route::get('/student/timetable', function () {

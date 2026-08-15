@@ -581,7 +581,22 @@
                         <p class="login-subtitle">Sign in to continue to your account</p>
                     </div>
 
-                    @if(session('status'))
+                    @if(session('student_register_success'))
+                        <div class="alert alert-success" id="student-success-banner">
+                            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+                                <div style="display: flex; align-items: flex-start; gap: 10px; flex: 1;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                                    <div>
+                                        <strong>Registration Successful!</strong>
+                                        <div>{{ session('student_register_success') }}</div>
+                                        <div style="margin-top: 12px;">
+                                            <a href="#student-login" class="inline-link" onclick="document.querySelector('[data-target=\'student-login\']').click(); return false;">Go to Student Login</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    @elseif(session('status'))
                         <div class="alert alert-success">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
                             {{ session('status') }}
@@ -696,6 +711,11 @@
                             <label class="input-label" for="reg-name">Student Name</label>
                             <input id="reg-name" name="name" type="text" class="input-field" value="{{ old('name') }}" placeholder="Full Name" required>
                         </div>
+
+                        <div class="input-group">
+                            <label class="input-label" for="reg-email">Email</label>
+                            <input id="reg-email" name="email" type="email" class="input-field" value="{{ old('email') }}" placeholder="Enter your email" required>
+                        </div>
                         
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
                             <div class="input-group" style="margin-bottom: 0;">
@@ -720,6 +740,11 @@
                         </div>
 
                         <div class="input-group">
+                            <label class="input-label" for="reg-password-confirm">Confirm Password</label>
+                            <input id="reg-password-confirm" name="password_confirmation" type="password" class="input-field" placeholder="Confirm password" required>
+                        </div>
+
+                        <div class="input-group">
                             <label class="input-label" for="reg-password">Password</label>
                             <div class="input-wrapper">
                                 <input id="reg-password" name="password" type="password" class="input-field" placeholder="Create a password" required>
@@ -729,11 +754,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="input-group">
-                            <label class="input-label" for="reg-password-confirm">Confirm Password</label>
-                            <input id="reg-password-confirm" name="password_confirmation" type="password" class="input-field" placeholder="Confirm password" required>
-                        </div>
-                        <button type="submit" class="btn-primary">Create Account</button>
+                        <button type="submit" class="btn-primary">Register</button>
                     </form>
 
                     <div class="register-link" id="register-toggle-section">
