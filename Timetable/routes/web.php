@@ -42,7 +42,18 @@ Route::get('/admin/dashboard', function () {
         return redirect('/admin/login');
     }
 
-    return view('admin.dashboard');
+    $stats = [
+        'departments' => Department::count(),
+        'faculty' => Faculty::count(),
+        'subjects' => Subject::count(),
+        'classrooms' => \App\Models\Classroom::count(),
+        'students' => User::count(),
+        'active_timetables' => \App\Models\TimetableEntry::select('department_id', 'semester', 'division', 'academic_year', 'term')
+            ->distinct()
+            ->count(),
+    ];
+
+    return view('admin.dashboard', compact('stats'));
 });
 
 Route::get('/admin/profile', function () {
