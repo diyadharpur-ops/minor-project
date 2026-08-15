@@ -81,7 +81,7 @@
             <a href="/admin/dashboard" class="sidebar-link {{ request()->is('admin/dashboard') ? 'active' : '' }}">Dashboard</a>
             <a href="/admin/departments" class="sidebar-link {{ request()->is('admin/departments*') ? 'active' : '' }}">Manage Departments</a>
             <a href="/admin/faculties" class="sidebar-link {{ request()->is('admin/faculties*') ? 'active' : '' }}">Manage Faculty</a>
-            <a href="/admin/faculty-workload" class="sidebar-link {{ request()->is('admin/faculty-workload*') ? 'active' : '' }}">Faculty Workload</a>
+            <a href="/admin/faculty-workload" class="sidebar-link {{ request()->is('admin/faculty-workload*') ? 'active' : '' }}">Faculty Workload Management</a>
             <a href="/admin/students" class="sidebar-link {{ request()->is('admin/students*') ? 'active' : '' }}">Manage Students</a>
             <a href="/admin/subjects" class="sidebar-link {{ request()->is('admin/subjects*') ? 'active' : '' }}">Manage Subjects</a>
             <a href="/admin/classrooms" class="sidebar-link {{ request()->is('admin/classrooms*') ? 'active' : '' }}">Manage Classrooms</a>

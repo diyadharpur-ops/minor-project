@@ -1,12 +1,12 @@
 @extends('admin.layout')
 
-@section('title', 'Assign Workload')
+@section('title', 'Add Faculty Workload')
 
 @section('content')
     <div class="page-header">
         <div>
-            <h1>Assign Workload</h1>
-            <p>Assign teaching hours and workload for faculty members using real database records.</p>
+            <h1>Faculty Workload Management</h1>
+            <p>Add a faculty workload record and let the system calculate the weekly total and workload status automatically.</p>
         </div>
         <div class="page-actions">
             <a href="/admin/faculty-workload" class="btn btn-muted">Back</a>
@@ -21,84 +21,86 @@
         <form method="POST" action="/admin/faculty-workload">
             @csrf
 
-            <div class="form-row">
-                <label for="faculty_id">Faculty</label>
-                <select id="faculty_id" name="faculty_id" required>
-                    <option value="">Select Faculty</option>
-                    @foreach ($faculties as $faculty)
-                        <option value="{{ $faculty->id }}" {{ old('faculty_id') == $faculty->id ? 'selected' : '' }}>{{ $faculty->name }}</option>
-                    @endforeach
-                </select>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
+                <div class="form-row">
+                    <label for="faculty_name">Faculty Name</label>
+                    <input id="faculty_name" type="text" name="faculty_name" value="{{ old('faculty_name') }}" placeholder="Enter faculty name" required>
+                </div>
+
+                <div class="form-row">
+                    <label for="faculty_id">Faculty ID</label>
+                    <input id="faculty_id" type="text" name="faculty_id" value="{{ old('faculty_id') }}" placeholder="e.g. FAC001" required>
+                </div>
+
+                <div class="form-row">
+                    <label for="department">Department</label>
+                    <input id="department" type="text" name="department" value="{{ old('department') }}" placeholder="e.g. Computer Engineering" required>
+                </div>
+
+                <div class="form-row" style="grid-column: 1 / -1;">
+                    <label for="subjects_assigned">Subjects Assigned</label>
+                    <input id="subjects_assigned" type="text" name="subjects_assigned" value="{{ old('subjects_assigned') }}" placeholder="e.g. DBMS, OS, Data Structures" required>
+                </div>
+
+                <div class="form-row">
+                    <label for="theory_hours">Theory Hours per Week</label>
+                    <input id="theory_hours" type="number" min="0" name="theory_hours" value="{{ old('theory_hours') }}" required>
+                </div>
+
+                <div class="form-row">
+                    <label for="practical_hours">Practical/Lab Hours per Week</label>
+                    <input id="practical_hours" type="number" min="0" name="practical_hours" value="{{ old('practical_hours') }}" required>
+                </div>
+
+                <div class="form-row">
+                    <label for="assigned_classes">Assigned Classes</label>
+                    <input id="assigned_classes" type="text" name="assigned_classes" value="{{ old('assigned_classes') }}" placeholder="e.g. CE-5A, CE-5B">
+                </div>
+
+                <div class="form-row">
+                    <label for="free_periods">Free Periods</label>
+                    <input id="free_periods" type="text" name="free_periods" value="{{ old('free_periods') }}" placeholder="e.g. 6">
+                </div>
+
+                <div class="form-row">
+                    <label for="total_hours">Total Hours per Week</label>
+                    <input id="total_hours" type="text" name="total_hours" value="{{ old('total_hours') ?? 0 }}" readonly>
+                </div>
+
+                <div class="form-row">
+                    <label for="workload_status">Workload Status</label>
+                    <input id="workload_status" type="text" name="workload_status" value="{{ old('workload_status') ?? 'Normal' }}" readonly>
+                </div>
             </div>
 
-            <div class="form-row">
-                <label for="department_id">Department</label>
-                <select id="department_id" name="department_id" required>
-                    <option value="">Select Department</option>
-                    @foreach ($departments as $department)
-                        <option value="{{ $department->id }}" {{ old('department_id') == $department->id ? 'selected' : '' }}>{{ $department->name }}</option>
-                    @endforeach
-                </select>
-            </div>
-
-            <div class="form-row">
-                <label for="subject_id">Subject</label>
-                <select id="subject_id" name="subject_id" required>
-                    <option value="">Select Subject</option>
-                    @foreach ($subjects as $subject)
-                        <option value="{{ $subject->id }}" {{ old('subject_id') == $subject->id ? 'selected' : '' }}>{{ $subject->name }} ({{ $subject->subject_code }})</option>
-                    @endforeach
-                </select>
-            </div>
-
-            <div class="form-row">
-                <label for="subject_type">Subject Type</label>
-                <select id="subject_type" name="subject_type" required>
-                    <option value="Theory" {{ old('subject_type') == 'Theory' ? 'selected' : '' }}>Theory</option>
-                    <option value="Practical" {{ old('subject_type') == 'Practical' ? 'selected' : '' }}>Practical</option>
-                    <option value="Lab" {{ old('subject_type') == 'Lab' ? 'selected' : '' }}>Lab</option>
-                </select>
-            </div>
-
-            <div class="form-row">
-                <label for="semester">Semester</label>
-                <input id="semester" type="text" name="semester" value="{{ old('semester') }}" required>
-            </div>
-
-            <div class="form-row">
-                <label for="class_name">Class / Division</label>
-                <input id="class_name" type="text" name="class_name" value="{{ old('class_name') }}" placeholder="e.g. CS-A">
-            </div>
-
-            <div class="form-row">
-                <label for="division">Division</label>
-                <input id="division" type="text" name="division" value="{{ old('division') }}" placeholder="A / B / C">
-            </div>
-
-            <div class="form-row">
-                <label for="theory_hours">Number of Theory Hours per Week</label>
-                <input id="theory_hours" type="number" min="0" name="theory_hours" value="{{ old('theory_hours') }}" required>
-            </div>
-
-            <div class="form-row">
-                <label for="practical_hours">Number of Practical / Lab Hours per Week</label>
-                <input id="practical_hours" type="number" min="0" name="practical_hours" value="{{ old('practical_hours') }}" required>
-            </div>
-
-            <div class="form-row">
-                <label for="assigned_classes">Assigned Classes</label>
-                <input id="assigned_classes" type="text" name="assigned_classes" value="{{ old('assigned_classes') }}" placeholder="e.g. CS-A, CS-B">
-            </div>
-
-            <div class="form-row">
-                <label for="free_periods">Free Periods</label>
-                <input id="free_periods" type="text" name="free_periods" value="{{ old('free_periods') }}" placeholder="e.g. Tuesday 3rd period">
-            </div>
-
-            <div class="page-actions">
-                <button type="submit" class="btn">Save Workload</button>
+            <div class="page-actions" style="margin-top: 20px;">
+                <button type="submit" class="btn">Save Faculty Workload</button>
                 <a href="/admin/faculty-workload" class="btn btn-muted">Cancel</a>
             </div>
         </form>
     </div>
+
+    <script>
+        function updateWorkloadSummary() {
+            const theory = parseInt(document.getElementById('theory_hours').value || 0, 10);
+            const practical = parseInt(document.getElementById('practical_hours').value || 0, 10);
+            const total = theory + practical;
+            const threshold = 18;
+            const status = total > threshold ? 'Overloaded' : 'Normal';
+
+            document.getElementById('total_hours').value = total;
+            document.getElementById('workload_status').value = status;
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const theoryInput = document.getElementById('theory_hours');
+            const practicalInput = document.getElementById('practical_hours');
+
+            if (theoryInput && practicalInput) {
+                theoryInput.addEventListener('input', updateWorkloadSummary);
+                practicalInput.addEventListener('input', updateWorkloadSummary);
+                updateWorkloadSummary();
+            }
+        });
+    </script>
 @endsection

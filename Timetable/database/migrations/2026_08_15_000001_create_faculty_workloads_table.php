@@ -13,18 +13,16 @@ return new class extends Migration
     {
         Schema::create('faculty_workloads', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('faculty_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('department_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('subject_id')->constrained()->cascadeOnDelete();
-            $table->string('subject_type')->default('Theory');
-            $table->string('semester');
-            $table->string('class_name')->nullable();
-            $table->string('division')->nullable();
+            $table->string('faculty_name');
+            $table->string('faculty_id');
+            $table->string('department');
+            $table->string('subjects_assigned');
             $table->unsignedInteger('theory_hours')->default(0);
             $table->unsignedInteger('practical_hours')->default(0);
+            $table->unsignedInteger('total_hours')->default(0);
             $table->text('assigned_classes')->nullable();
             $table->text('free_periods')->nullable();
-            $table->foreignId('timetable_id')->nullable()->constrained('timetable_entries')->nullOnDelete();
+            $table->string('workload_status')->default('Normal');
             $table->timestamps();
         });
     }
