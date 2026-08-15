@@ -3,6 +3,7 @@
 use App\Models\Classroom;
 use App\Models\Department;
 use App\Models\Faculty;
+use App\Models\FacultyWorkload;
 use App\Models\Notification;
 use App\Models\Subject;
 use App\Models\User;
@@ -469,6 +470,218 @@ Route::post('/admin/faculties/{id}/delete', function ($id) {
     }
 
     return redirect('/admin/faculties');
+});
+
+Route::get('/admin/faculty-workload/export', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $workloads = FacultyWorkload::with(['faculty', 'department', 'subject'])->orderBy('created_at', 'desc')->get();
+    $csv = fopen('php://temp', 'w+');
+    fputcsv($csv, ['Faculty Name', 'Faculty ID', 'Department', 'Subject', 'Theory Hours', 'Practical/Lab Hours', 'Total Hours', 'Status']);
+
+    foreach ($workloads as $workload) {
+        fputcsv($csv, [
+            $workload->faculty?->name ?? 'N/A',
+            $workload->faculty?->id ?? 'N/A',
+            $workload->department?->name ?? 'N/A',
+            $workload->subject?->name ?? 'N/A',
+            $workload->theory_hours,
+            $workload->practical_hours,
+            $workload->total_hours,
+            $workload->status,
+        ]);
+    }
+
+    rewind($csv);
+    $content = stream_get_contents($csv);
+    fclose($csv);
+
+    return response($content)
+        ->header('Content-Type', 'text/csv; charset=utf-8')
+        ->header('Content-Disposition', 'attachment; filename="faculty_workload_export.csv"');
+});
+
+Route::get('/admin/faculty-workload', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $workloads = FacultyWorkload::with(['faculty', 'department', 'subject'])
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    $q = trim((string) $request->input('q', ''));
+    $departmentId = $request->input('department_id');
+    $semester = $request->input('semester');
+    $status = $request->input('status');
+    $subjectId = $request->input('subject_id');
+    $sort = $request->input('sort', 'total_hours_desc');
+
+    if ($q !== '') {
+        $workloads = $workloads->filter(function ($workload) use ($q) {
+            $facultyName = strtolower((string) ($workload->faculty?->name ?? ''));
+            $facultyId = strtolower((string) ($workload->faculty?->id ?? ''));
+            $query = strtolower($q);
+
+            return str_contains($facultyName, $query) || str_contains($facultyId, $query);
+        });
+    }
+
+    if ($departmentId) {
+        $workloads = $workloads->filter(fn ($workload) => (string) $workload->department_id === (string) $departmentId);
+    }
+
+    if ($semester) {
+        $workloads = $workloads->filter(fn ($workload) => (string) $workload->semester === (string) $semester);
+    }
+
+    if ($status) {
+        $workloads = $workloads->filter(fn ($workload) => $workload->status === $status);
+    }
+
+    if ($subjectId) {
+        $workloads = $workloads->filter(fn ($workload) => (string) $workload->subject_id === (string) $subjectId);
+    }
+
+    $workloads = $workloads->values()->sortByDesc(function ($workload) {
+        return $workload->total_hours;
+    });
+
+    if ($sort === 'total_hours_asc') {
+        $workloads = $workloads->sortBy('total_hours');
+    }
+
+    $summary = [
+        'total_faculty' => $workloads->unique('faculty_id')->count(),
+        'total_teaching_hours' => $workloads->sum(fn ($workload) => $workload->total_hours),
+        'average_hours' => $workloads->isNotEmpty() ? round($workloads->sum(fn ($workload) => $workload->total_hours) / $workloads->unique('faculty_id')->count(), 1) : 0,
+        'normal' => $workloads->filter(fn ($workload) => $workload->status === 'Normal')->count(),
+        'high' => $workloads->filter(fn ($workload) => $workload->status === 'High')->count(),
+        'overloaded' => $workloads->filter(fn ($workload) => $workload->status === 'Overloaded')->count(),
+    ];
+
+    $departments = Department::orderBy('name')->get();
+    $semesters = FacultyWorkload::select('semester')->distinct()->pluck('semester')->filter()->values();
+    $subjects = Subject::orderBy('name')->get();
+
+    return view('admin.faculty-workload.index', [
+        'workloads' => $workloads,
+        'summary' => $summary,
+        'departments' => $departments,
+        'semesters' => $semesters,
+        'subjects' => $subjects,
+        'q' => $q,
+        'departmentId' => $departmentId,
+        'semester' => $semester,
+        'status' => $status,
+        'subjectId' => $subjectId,
+        'sort' => $sort,
+    ]);
+});
+
+Route::get('/admin/faculty-workload/create', function () {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    return view('admin.faculty-workload.create', [
+        'faculties' => Faculty::orderBy('name')->get(),
+        'departments' => Department::orderBy('name')->get(),
+        'subjects' => Subject::orderBy('name')->get(),
+    ]);
+});
+
+Route::post('/admin/faculty-workload', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $data = $request->validate([
+        'faculty_id' => 'required|exists:faculties,id',
+        'department_id' => 'required|exists:departments,id',
+        'subject_id' => 'required|exists:subjects,id',
+        'subject_type' => 'required|string|in:Theory,Practical,Lab',
+        'semester' => 'required|string|max:50',
+        'class_name' => 'nullable|string|max:100',
+        'division' => 'nullable|string|max:50',
+        'theory_hours' => 'required|integer|min:0',
+        'practical_hours' => 'required|integer|min:0',
+        'assigned_classes' => 'nullable|string|max:255',
+        'free_periods' => 'nullable|string|max:255',
+        'timetable_id' => 'nullable|integer',
+    ]);
+
+    FacultyWorkload::create($data);
+
+    return redirect('/admin/faculty-workload')->with('status', 'Faculty workload saved successfully.');
+});
+
+Route::get('/admin/faculty-workload/{id}', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $workload = FacultyWorkload::with(['faculty', 'department', 'subject'])->findOrFail($id);
+
+    return view('admin.faculty-workload.show', compact('workload'));
+});
+
+Route::get('/admin/faculty-workload/{id}/edit', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $workload = FacultyWorkload::findOrFail($id);
+
+    return view('admin.faculty-workload.edit', [
+        'workload' => $workload,
+        'faculties' => Faculty::orderBy('name')->get(),
+        'departments' => Department::orderBy('name')->get(),
+        'subjects' => Subject::orderBy('name')->get(),
+    ]);
+});
+
+Route::post('/admin/faculty-workload/{id}', function (Request $request, $id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $workload = FacultyWorkload::findOrFail($id);
+
+    $data = $request->validate([
+        'faculty_id' => 'required|exists:faculties,id',
+        'department_id' => 'required|exists:departments,id',
+        'subject_id' => 'required|exists:subjects,id',
+        'subject_type' => 'required|string|in:Theory,Practical,Lab',
+        'semester' => 'required|string|max:50',
+        'class_name' => 'nullable|string|max:100',
+        'division' => 'nullable|string|max:50',
+        'theory_hours' => 'required|integer|min:0',
+        'practical_hours' => 'required|integer|min:0',
+        'assigned_classes' => 'nullable|string|max:255',
+        'free_periods' => 'nullable|string|max:255',
+        'timetable_id' => 'nullable|integer',
+    ]);
+
+    $workload->update($data);
+
+    return redirect('/admin/faculty-workload')->with('status', 'Faculty workload updated successfully.');
+});
+
+Route::post('/admin/faculty-workload/{id}/delete', function ($id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $workload = FacultyWorkload::find($id);
+
+    if ($workload) {
+        $workload->delete();
+    }
+
+    return redirect('/admin/faculty-workload')->with('status', 'Faculty workload deleted successfully.');
 });
 
 Route::get('/admin/subjects', function (Request $request) {
