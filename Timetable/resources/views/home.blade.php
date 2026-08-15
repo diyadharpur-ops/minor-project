@@ -635,13 +635,13 @@
                         <div class="input-group">
                             <label class="input-label" for="faculty-email">Email Address</label>
                             <div class="input-wrapper">
-                                <input id="faculty-email" name="email" type="text" class="input-field" value="{{ old('email', 'faculty@example.com') }}" placeholder="Enter your email" required>
+                                <input id="faculty-email" name="email" type="text" class="input-field" value="{{ old('email') }}" placeholder="Enter your email" required>
                             </div>
                         </div>
                         <div class="input-group">
                             <label class="input-label" for="faculty-password">Password</label>
                             <div class="input-wrapper">
-                                <input id="faculty-password" name="password" type="password" class="input-field" value="password" placeholder="Enter your password" required>
+                                <input id="faculty-password" name="password" type="password" class="input-field" placeholder="Enter your password" required>
                                 <button type="button" class="password-toggle" onclick="togglePassword('faculty-password')">
                                     <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                                     <svg class="eye-off-icon" style="display:none;" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
@@ -736,45 +736,12 @@
                         <button type="submit" class="btn-primary">Create Account</button>
                     </form>
 
-                    <div id="social-login-section">
-                        <div class="divider">or</div>
-                        
-                        <button class="btn-google">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 48 48">
-                                <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/>
-                                <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/>
-                                <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/>
-                                <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/>
-                            </svg>
-                            Login with Google
-                        </button>
-                    </div>
-
                     <div class="register-link" id="register-toggle-section">
                         New here? <a href="#" id="toggle-register">Register as Student</a>
                     </div>
                     
                     <div class="register-link" id="login-toggle-section" style="display: none;">
                         Already have an account? <a href="#" id="toggle-login">Back to Login</a>
-                    </div>
-
-                    <div class="default-credentials" id="default-credentials-box">
-                        <div class="default-credentials-title">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-                            Default Login Credentials
-                        </div>
-                        <div class="cred-item">
-                            <div><span class="cred-label">Email:</span> <span class="cred-value" id="def-email">kdp@631</span></div>
-                            <button type="button" class="btn-copy" onclick="copyText('def-email')" title="Copy Email">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                            </button>
-                        </div>
-                        <div class="cred-item">
-                            <div><span class="cred-label">Password:</span> <span class="cred-value" id="def-pass">kdp@12345</span></div>
-                            <button type="button" class="btn-copy" onclick="copyText('def-pass')" title="Copy Password">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                            </button>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -788,10 +755,8 @@
         // Tab switching logic
         const tabs = document.querySelectorAll('.role-tab');
         const forms = document.querySelectorAll('.form-section');
-        const defaultCredsBox = document.getElementById('default-credentials-box');
         
         // Sections to hide when registering
-        const socialLoginSection = document.getElementById('social-login-section');
         const registerToggleSection = document.getElementById('register-toggle-section');
         const loginToggleSection = document.getElementById('login-toggle-section');
         const roleTabsContainer = document.querySelector('.role-tabs');
@@ -820,9 +785,7 @@
             document.getElementById('student-register').classList.add('active');
             
             roleTabsContainer.style.display = 'none';
-            socialLoginSection.style.display = 'none';
             registerToggleSection.style.display = 'none';
-            defaultCredsBox.style.display = 'none';
             loginToggleSection.style.display = 'block';
             
             loginTitle.textContent = "Create an Account";
@@ -836,9 +799,7 @@
             document.querySelector('.role-tab.active').click();
             
             roleTabsContainer.style.display = 'flex';
-            socialLoginSection.style.display = 'block';
             registerToggleSection.style.display = 'block';
-            defaultCredsBox.style.display = 'block';
             loginToggleSection.style.display = 'none';
             
             loginTitle.textContent = "Welcome Back!";
