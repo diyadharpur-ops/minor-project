@@ -32,3 +32,16 @@ test('admin can create and list classrooms', function () {
         'availability' => 'Available',
     ]);
 });
+
+test('admin classroom allocation page loads without demo data', function () {
+    $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/classroom-allocation')
+        ->assertOk()
+        ->assertSee('Classroom & Lab Allocation')
+        ->assertSee('No rooms added yet.')
+        ->assertSee('No allocations found.');
+});
