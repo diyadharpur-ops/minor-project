@@ -4,69 +4,52 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
+    'faculty_name',
     'faculty_id',
-    'department_id',
-    'subject_id',
-    'subject_type',
-    'semester',
-    'class_name',
-    'division',
+    'department',
+    'subjects_assigned',
     'theory_hours',
     'practical_hours',
+    'total_hours',
     'assigned_classes',
     'free_periods',
-    'timetable_id',
+    'workload_status',
 ])]
 class FacultyWorkload extends Model
 {
-    protected $appends = ['total_hours', 'status'];
-
-    public function faculty(): BelongsTo
-    {
-        return $this->belongsTo(Faculty::class);
-    }
-
-    public function department(): BelongsTo
-    {
-        return $this->belongsTo(Department::class);
-    }
-
-    public function subject(): BelongsTo
-    {
-        return $this->belongsTo(Subject::class);
-    }
-
-    public function timetableEntry(): BelongsTo
-    {
-        return $this->belongsTo(TimetableEntry::class, 'timetable_id');
-    }
+    protected $appends = ['total_hours', 'workload_status'];
 
     public function getTotalHoursAttribute(): int
     {
+        if (! empty($this->attributes['total_hours']) || $this->attributes['total_hours'] === '0') {
+            return (int) $this->attributes['total_hours'];
+        }
+
         return (int) ($this->theory_hours ?? 0) + (int) ($this->practical_hours ?? 0);
+    }
+
+    public function getWorkloadStatusAttribute(): string
+    {
+        $status = $this->attributes['workload_status'] ?? null;
+
+        if (! empty($status)) {
+            return (string) $status;
+        }
+
+        return self::calculateStatus($this->getTotalHoursAttribute());
     }
 
     public function getStatusAttribute(): string
     {
-        return self::statusForHours($this->getTotalHoursAttribute());
+        return $this->getWorkloadStatusAttribute();
     }
 
-    public static function statusForHours(int $totalHours): string
+    public static function calculateStatus(int $totalHours): string
     {
         $normalThreshold = (int) config('faculty_workload.normal_threshold', 18);
-        $highThreshold = (int) config('faculty_workload.high_threshold', 24);
 
-        if ($totalHours <= $normalThreshold) {
-            return 'Normal';
-        }
-
-        if ($totalHours <= $highThreshold) {
-            return 'High';
-        }
-
-        return 'Overloaded';
+        return $totalHours > $normalThreshold ? 'Overloaded' : 'Normal';
     }
 }

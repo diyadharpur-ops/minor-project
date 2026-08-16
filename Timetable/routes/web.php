@@ -57,6 +57,148 @@ Route::get('/admin/dashboard', function () {
     return view('admin.dashboard', compact('stats'));
 });
 
+Route::match(['get', 'post'], '/admin/conflicts', function () {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $entries = \App\Models\TimetableEntry::with(['subject', 'faculty', 'classroom'])
+        ->orderBy('day')
+        ->orderBy('time_slot')
+        ->get();
+
+    $summary = [
+        'faculty_conflict' => 0,
+        'classroom_conflict' => 0,
+        'lab_conflict' => 0,
+        'duplicate_subject' => 0,
+    ];
+
+    $conflicts = collect();
+
+    $facultySlots = [];
+    $classroomSlots = [];
+    $labSlots = [];
+    $subjectSlots = [];
+
+    foreach ($entries as $entry) {
+        if ($entry->faculty_id && $entry->day && $entry->time_slot) {
+            $key = $entry->faculty_id . '|' . $entry->day . '|' . $entry->time_slot;
+            $facultySlots[$key][] = $entry;
+        }
+
+        if ($entry->classroom_id && $entry->day && $entry->time_slot) {
+            $classroomKey = $entry->classroom_id . '|' . $entry->day . '|' . $entry->time_slot;
+            $classroomSlots[$classroomKey][] = $entry;
+
+            if ($entry->classroom && str_contains(strtolower((string) $entry->classroom->room_type), 'lab')) {
+                $labSlots[$classroomKey][] = $entry;
+            }
+        }
+
+        if ($entry->subject_id && $entry->day && $entry->time_slot) {
+            $subjectKey = $entry->subject_id . '|' . $entry->day . '|' . $entry->time_slot;
+            $subjectSlots[$subjectKey][] = $entry;
+        }
+    }
+
+    foreach ($facultySlots as $items) {
+        if (count($items) < 2) {
+            continue;
+        }
+
+        $summary['faculty_conflict'] += 1;
+
+        foreach ($items as $entry) {
+            $conflicts->push([
+                'type' => 'Faculty Conflict',
+                'type_class' => 'faculty',
+                'day' => $entry->day,
+                'time' => $entry->time_slot,
+                'subject' => $entry->subject?->name ?? 'Unknown subject',
+                'faculty' => $entry->faculty?->name ?? 'Unknown faculty',
+                'room' => $entry->classroom?->room_number ?? 'Unknown room',
+                'details' => 'Faculty assigned to more than one class in the same slot.',
+            ]);
+        }
+    }
+
+    foreach ($classroomSlots as $items) {
+        if (count($items) < 2) {
+            continue;
+        }
+
+        $summary['classroom_conflict'] += 1;
+
+        foreach ($items as $entry) {
+            $conflicts->push([
+                'type' => 'Classroom Conflict',
+                'type_class' => 'classroom',
+                'day' => $entry->day,
+                'time' => $entry->time_slot,
+                'subject' => $entry->subject?->name ?? 'Unknown subject',
+                'faculty' => $entry->faculty?->name ?? 'Unknown faculty',
+                'room' => $entry->classroom?->room_number ?? 'Unknown room',
+                'details' => 'Two or more classes assigned to the same room at the same time.',
+            ]);
+        }
+    }
+
+    foreach ($labSlots as $items) {
+        if (count($items) < 2) {
+            continue;
+        }
+
+        $summary['lab_conflict'] += 1;
+
+        foreach ($items as $entry) {
+            $conflicts->push([
+                'type' => 'Lab Conflict',
+                'type_class' => 'lab',
+                'day' => $entry->day,
+                'time' => $entry->time_slot,
+                'subject' => $entry->subject?->name ?? 'Unknown subject',
+                'faculty' => $entry->faculty?->name ?? 'Unknown faculty',
+                'room' => $entry->classroom?->room_number ?? 'Unknown room',
+                'details' => 'Multiple lab sessions overlap in the same laboratory room.',
+            ]);
+        }
+    }
+
+    foreach ($subjectSlots as $items) {
+        if (count($items) < 2) {
+            continue;
+        }
+
+        $summary['duplicate_subject'] += 1;
+
+        foreach ($items as $entry) {
+            $conflicts->push([
+                'type' => 'Same Subject Duplicate Slot',
+                'type_class' => 'subject',
+                'day' => $entry->day,
+                'time' => $entry->time_slot,
+                'subject' => $entry->subject?->name ?? 'Unknown subject',
+                'faculty' => $entry->faculty?->name ?? 'Unknown faculty',
+                'room' => $entry->classroom?->room_number ?? 'Unknown room',
+                'details' => 'The same subject appears more than once in the same time slot.',
+            ]);
+        }
+    }
+
+    $summaryCards = [
+        ['title' => 'Faculty Conflict', 'value' => $summary['faculty_conflict'], 'icon' => 'faculty', 'subtext' => 'overlaps'],
+        ['title' => 'Classroom Conflict', 'value' => $summary['classroom_conflict'], 'icon' => 'classroom', 'subtext' => 'room clashes'],
+        ['title' => 'Lab Conflict', 'value' => $summary['lab_conflict'], 'icon' => 'lab', 'subtext' => 'lab overlaps'],
+        ['title' => 'Same Subject Duplicate Slot', 'value' => $summary['duplicate_subject'], 'icon' => 'subject', 'subtext' => 'duplicate entries'],
+    ];
+
+    return view('admin.conflicts', [
+        'summaryCards' => $summaryCards,
+        'conflicts' => $conflicts,
+    ]);
+});
+
 Route::get('/admin/profile', function () {
     if (! session('admin.auth')) {
         return redirect('/admin/login');
@@ -472,112 +614,46 @@ Route::post('/admin/faculties/{id}/delete', function ($id) {
     return redirect('/admin/faculties');
 });
 
-Route::get('/admin/faculty-workload/export', function (Request $request) {
-    if (! session('admin.auth')) {
-        return redirect('/admin/login');
-    }
-
-    $workloads = FacultyWorkload::with(['faculty', 'department', 'subject'])->orderBy('created_at', 'desc')->get();
-    $csv = fopen('php://temp', 'w+');
-    fputcsv($csv, ['Faculty Name', 'Faculty ID', 'Department', 'Subject', 'Theory Hours', 'Practical/Lab Hours', 'Total Hours', 'Status']);
-
-    foreach ($workloads as $workload) {
-        fputcsv($csv, [
-            $workload->faculty?->name ?? 'N/A',
-            $workload->faculty?->id ?? 'N/A',
-            $workload->department?->name ?? 'N/A',
-            $workload->subject?->name ?? 'N/A',
-            $workload->theory_hours,
-            $workload->practical_hours,
-            $workload->total_hours,
-            $workload->status,
-        ]);
-    }
-
-    rewind($csv);
-    $content = stream_get_contents($csv);
-    fclose($csv);
-
-    return response($content)
-        ->header('Content-Type', 'text/csv; charset=utf-8')
-        ->header('Content-Disposition', 'attachment; filename="faculty_workload_export.csv"');
-});
-
 Route::get('/admin/faculty-workload', function (Request $request) {
     if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
-    $workloads = FacultyWorkload::with(['faculty', 'department', 'subject'])
-        ->orderBy('created_at', 'desc')
-        ->get();
+    $query = FacultyWorkload::query();
+    $search = trim((string) $request->input('q', ''));
+    $departmentFilter = trim((string) $request->input('department', ''));
+    $statusFilter = trim((string) $request->input('status', ''));
 
-    $q = trim((string) $request->input('q', ''));
-    $departmentId = $request->input('department_id');
-    $semester = $request->input('semester');
-    $status = $request->input('status');
-    $subjectId = $request->input('subject_id');
-    $sort = $request->input('sort', 'total_hours_desc');
-
-    if ($q !== '') {
-        $workloads = $workloads->filter(function ($workload) use ($q) {
-            $facultyName = strtolower((string) ($workload->faculty?->name ?? ''));
-            $facultyId = strtolower((string) ($workload->faculty?->id ?? ''));
-            $query = strtolower($q);
-
-            return str_contains($facultyName, $query) || str_contains($facultyId, $query);
+    if ($search !== '') {
+        $query->where(function ($q) use ($search) {
+            $q->where('faculty_name', 'like', '%'.$search.'%')
+              ->orWhere('faculty_id', 'like', '%'.$search.'%');
         });
     }
 
-    if ($departmentId) {
-        $workloads = $workloads->filter(fn ($workload) => (string) $workload->department_id === (string) $departmentId);
+    if ($departmentFilter !== '') {
+        $query->where('department', $departmentFilter);
     }
 
-    if ($semester) {
-        $workloads = $workloads->filter(fn ($workload) => (string) $workload->semester === (string) $semester);
+    if ($statusFilter !== '') {
+        $query->where('workload_status', $statusFilter);
     }
 
-    if ($status) {
-        $workloads = $workloads->filter(fn ($workload) => $workload->status === $status);
-    }
+    $workloads = $query->orderByDesc('created_at')->get();
 
-    if ($subjectId) {
-        $workloads = $workloads->filter(fn ($workload) => (string) $workload->subject_id === (string) $subjectId);
-    }
-
-    $workloads = $workloads->values()->sortByDesc(function ($workload) {
-        return $workload->total_hours;
-    });
-
-    if ($sort === 'total_hours_asc') {
-        $workloads = $workloads->sortBy('total_hours');
-    }
-
-    $summary = [
-        'total_faculty' => $workloads->unique('faculty_id')->count(),
-        'total_teaching_hours' => $workloads->sum(fn ($workload) => $workload->total_hours),
-        'average_hours' => $workloads->isNotEmpty() ? round($workloads->sum(fn ($workload) => $workload->total_hours) / $workloads->unique('faculty_id')->count(), 1) : 0,
-        'normal' => $workloads->filter(fn ($workload) => $workload->status === 'Normal')->count(),
-        'high' => $workloads->filter(fn ($workload) => $workload->status === 'High')->count(),
-        'overloaded' => $workloads->filter(fn ($workload) => $workload->status === 'Overloaded')->count(),
-    ];
-
-    $departments = Department::orderBy('name')->get();
-    $semesters = FacultyWorkload::select('semester')->distinct()->pluck('semester')->filter()->values();
-    $subjects = Subject::orderBy('name')->get();
+    $departments = FacultyWorkload::query()
+        ->whereNotNull('department')
+        ->where('department', '!=', '')
+        ->distinct()
+        ->orderBy('department')
+        ->pluck('department');
 
     return view('admin.faculty-workload.index', [
         'workloads' => $workloads,
-        'summary' => $summary,
         'departments' => $departments,
-        'semesters' => $semesters,
-        'subjects' => $subjects,
-        'q' => $q,
-        'departmentId' => $departmentId,
-        'semester' => $semester,
-        'status' => $status,
-        'subjectId' => $subjectId,
-        'sort' => $sort,
+        'q' => $search,
+        'departmentFilter' => $departmentFilter,
+        'statusFilter' => $statusFilter,
     ]);
 });
 
@@ -586,11 +662,7 @@ Route::get('/admin/faculty-workload/create', function () {
         return redirect('/admin/login');
     }
 
-    return view('admin.faculty-workload.create', [
-        'faculties' => Faculty::orderBy('name')->get(),
-        'departments' => Department::orderBy('name')->get(),
-        'subjects' => Subject::orderBy('name')->get(),
-    ]);
+    return view('admin.faculty-workload.create');
 });
 
 Route::post('/admin/faculty-workload', function (Request $request) {
@@ -599,19 +671,20 @@ Route::post('/admin/faculty-workload', function (Request $request) {
     }
 
     $data = $request->validate([
-        'faculty_id' => 'required|exists:faculties,id',
-        'department_id' => 'required|exists:departments,id',
-        'subject_id' => 'required|exists:subjects,id',
-        'subject_type' => 'required|string|in:Theory,Practical,Lab',
-        'semester' => 'required|string|max:50',
-        'class_name' => 'nullable|string|max:100',
-        'division' => 'nullable|string|max:50',
+        'faculty_name' => 'required|string|max:255',
+        'faculty_id' => 'required|string|max:100',
+        'department' => 'required|string|max:255',
+        'subjects_assigned' => 'required|string|max:500',
         'theory_hours' => 'required|integer|min:0',
         'practical_hours' => 'required|integer|min:0',
         'assigned_classes' => 'nullable|string|max:255',
         'free_periods' => 'nullable|string|max:255',
-        'timetable_id' => 'nullable|integer',
     ]);
+
+    $totalHours = (int) $data['theory_hours'] + (int) $data['practical_hours'];
+    $data['total_hours'] = $totalHours;
+    $normalThreshold = (int) config('faculty_workload.normal_threshold', 18);
+    $data['workload_status'] = $totalHours > $normalThreshold ? 'Overloaded' : 'Normal';
 
     FacultyWorkload::create($data);
 
@@ -623,7 +696,7 @@ Route::get('/admin/faculty-workload/{id}', function ($id) {
         return redirect('/admin/login');
     }
 
-    $workload = FacultyWorkload::with(['faculty', 'department', 'subject'])->findOrFail($id);
+    $workload = FacultyWorkload::findOrFail($id);
 
     return view('admin.faculty-workload.show', compact('workload'));
 });
@@ -635,12 +708,7 @@ Route::get('/admin/faculty-workload/{id}/edit', function ($id) {
 
     $workload = FacultyWorkload::findOrFail($id);
 
-    return view('admin.faculty-workload.edit', [
-        'workload' => $workload,
-        'faculties' => Faculty::orderBy('name')->get(),
-        'departments' => Department::orderBy('name')->get(),
-        'subjects' => Subject::orderBy('name')->get(),
-    ]);
+    return view('admin.faculty-workload.edit', compact('workload'));
 });
 
 Route::post('/admin/faculty-workload/{id}', function (Request $request, $id) {
@@ -651,19 +719,20 @@ Route::post('/admin/faculty-workload/{id}', function (Request $request, $id) {
     $workload = FacultyWorkload::findOrFail($id);
 
     $data = $request->validate([
-        'faculty_id' => 'required|exists:faculties,id',
-        'department_id' => 'required|exists:departments,id',
-        'subject_id' => 'required|exists:subjects,id',
-        'subject_type' => 'required|string|in:Theory,Practical,Lab',
-        'semester' => 'required|string|max:50',
-        'class_name' => 'nullable|string|max:100',
-        'division' => 'nullable|string|max:50',
+        'faculty_name' => 'required|string|max:255',
+        'faculty_id' => 'required|string|max:100',
+        'department' => 'required|string|max:255',
+        'subjects_assigned' => 'required|string|max:500',
         'theory_hours' => 'required|integer|min:0',
         'practical_hours' => 'required|integer|min:0',
         'assigned_classes' => 'nullable|string|max:255',
         'free_periods' => 'nullable|string|max:255',
-        'timetable_id' => 'nullable|integer',
     ]);
+
+    $totalHours = (int) $data['theory_hours'] + (int) $data['practical_hours'];
+    $data['total_hours'] = $totalHours;
+    $normalThreshold = (int) config('faculty_workload.normal_threshold', 18);
+    $data['workload_status'] = $totalHours > $normalThreshold ? 'Overloaded' : 'Normal';
 
     $workload->update($data);
 
