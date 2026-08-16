@@ -57,6 +57,148 @@ Route::get('/admin/dashboard', function () {
     return view('admin.dashboard', compact('stats'));
 });
 
+Route::match(['get', 'post'], '/admin/conflicts', function () {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $entries = \App\Models\TimetableEntry::with(['subject', 'faculty', 'classroom'])
+        ->orderBy('day')
+        ->orderBy('time_slot')
+        ->get();
+
+    $summary = [
+        'faculty_conflict' => 0,
+        'classroom_conflict' => 0,
+        'lab_conflict' => 0,
+        'duplicate_subject' => 0,
+    ];
+
+    $conflicts = collect();
+
+    $facultySlots = [];
+    $classroomSlots = [];
+    $labSlots = [];
+    $subjectSlots = [];
+
+    foreach ($entries as $entry) {
+        if ($entry->faculty_id && $entry->day && $entry->time_slot) {
+            $key = $entry->faculty_id . '|' . $entry->day . '|' . $entry->time_slot;
+            $facultySlots[$key][] = $entry;
+        }
+
+        if ($entry->classroom_id && $entry->day && $entry->time_slot) {
+            $classroomKey = $entry->classroom_id . '|' . $entry->day . '|' . $entry->time_slot;
+            $classroomSlots[$classroomKey][] = $entry;
+
+            if ($entry->classroom && str_contains(strtolower((string) $entry->classroom->room_type), 'lab')) {
+                $labSlots[$classroomKey][] = $entry;
+            }
+        }
+
+        if ($entry->subject_id && $entry->day && $entry->time_slot) {
+            $subjectKey = $entry->subject_id . '|' . $entry->day . '|' . $entry->time_slot;
+            $subjectSlots[$subjectKey][] = $entry;
+        }
+    }
+
+    foreach ($facultySlots as $items) {
+        if (count($items) < 2) {
+            continue;
+        }
+
+        $summary['faculty_conflict'] += 1;
+
+        foreach ($items as $entry) {
+            $conflicts->push([
+                'type' => 'Faculty Conflict',
+                'type_class' => 'faculty',
+                'day' => $entry->day,
+                'time' => $entry->time_slot,
+                'subject' => $entry->subject?->name ?? 'Unknown subject',
+                'faculty' => $entry->faculty?->name ?? 'Unknown faculty',
+                'room' => $entry->classroom?->room_number ?? 'Unknown room',
+                'details' => 'Faculty assigned to more than one class in the same slot.',
+            ]);
+        }
+    }
+
+    foreach ($classroomSlots as $items) {
+        if (count($items) < 2) {
+            continue;
+        }
+
+        $summary['classroom_conflict'] += 1;
+
+        foreach ($items as $entry) {
+            $conflicts->push([
+                'type' => 'Classroom Conflict',
+                'type_class' => 'classroom',
+                'day' => $entry->day,
+                'time' => $entry->time_slot,
+                'subject' => $entry->subject?->name ?? 'Unknown subject',
+                'faculty' => $entry->faculty?->name ?? 'Unknown faculty',
+                'room' => $entry->classroom?->room_number ?? 'Unknown room',
+                'details' => 'Two or more classes assigned to the same room at the same time.',
+            ]);
+        }
+    }
+
+    foreach ($labSlots as $items) {
+        if (count($items) < 2) {
+            continue;
+        }
+
+        $summary['lab_conflict'] += 1;
+
+        foreach ($items as $entry) {
+            $conflicts->push([
+                'type' => 'Lab Conflict',
+                'type_class' => 'lab',
+                'day' => $entry->day,
+                'time' => $entry->time_slot,
+                'subject' => $entry->subject?->name ?? 'Unknown subject',
+                'faculty' => $entry->faculty?->name ?? 'Unknown faculty',
+                'room' => $entry->classroom?->room_number ?? 'Unknown room',
+                'details' => 'Multiple lab sessions overlap in the same laboratory room.',
+            ]);
+        }
+    }
+
+    foreach ($subjectSlots as $items) {
+        if (count($items) < 2) {
+            continue;
+        }
+
+        $summary['duplicate_subject'] += 1;
+
+        foreach ($items as $entry) {
+            $conflicts->push([
+                'type' => 'Same Subject Duplicate Slot',
+                'type_class' => 'subject',
+                'day' => $entry->day,
+                'time' => $entry->time_slot,
+                'subject' => $entry->subject?->name ?? 'Unknown subject',
+                'faculty' => $entry->faculty?->name ?? 'Unknown faculty',
+                'room' => $entry->classroom?->room_number ?? 'Unknown room',
+                'details' => 'The same subject appears more than once in the same time slot.',
+            ]);
+        }
+    }
+
+    $summaryCards = [
+        ['title' => 'Faculty Conflict', 'value' => $summary['faculty_conflict'], 'icon' => 'faculty', 'subtext' => 'overlaps'],
+        ['title' => 'Classroom Conflict', 'value' => $summary['classroom_conflict'], 'icon' => 'classroom', 'subtext' => 'room clashes'],
+        ['title' => 'Lab Conflict', 'value' => $summary['lab_conflict'], 'icon' => 'lab', 'subtext' => 'lab overlaps'],
+        ['title' => 'Same Subject Duplicate Slot', 'value' => $summary['duplicate_subject'], 'icon' => 'subject', 'subtext' => 'duplicate entries'],
+    ];
+
+    return view('admin.conflicts', [
+        'summaryCards' => $summaryCards,
+        'conflicts' => $conflicts,
+    ]);
+});
+
 Route::get('/admin/profile', function () {
     if (! session('admin.auth')) {
         return redirect('/admin/login');

@@ -12,7 +12,7 @@ describe('admin authentication', function () {
         ]);
 
         $response->assertRedirect('/admin/dashboard');
-        $this->assertSessionHas('admin.auth', [
+        $response->assertSessionHas('admin.auth', [
             'email' => 'admin@example.com',
             'name' => 'Admin User',
         ]);

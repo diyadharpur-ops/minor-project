@@ -88,6 +88,7 @@
             <a href="/admin/classroom-allocation" class="sidebar-link {{ request()->is('admin/classroom-allocation*') ? 'active' : '' }}">Classroom &amp; Lab Allocation</a>
             <a href="/admin/notifications" class="sidebar-link {{ request()->is('admin/notifications*') ? 'active' : '' }}">Notification Management</a>
             <a href="/admin/timetable" class="sidebar-link {{ request()->is('admin/timetable*') ? 'active' : '' }}">Generate Timetable</a>
+            <a href="/admin/conflicts" class="sidebar-link {{ request()->is('admin/conflicts*') ? 'active' : '' }}">Conflict Detection</a>
             <a href="/admin/reports" class="sidebar-link {{ request()->is('admin/reports*') ? 'active' : '' }}">Reports</a>
             <a href="/admin/profile" class="sidebar-link {{ request()->is('admin/profile') ? 'active' : '' }}">Admin Profile</a>
             <form method="POST" action="/admin/logout">
