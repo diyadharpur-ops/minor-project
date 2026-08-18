@@ -151,11 +151,6 @@
         <div class="val" style="color: #991b1b;">{{ $unallocatedCount ?? 0 }}</div>
     </div>
 </div>
-    <div class="summary-card">
-        <h3>Unallocated</h3>
-        <div class="val" style="color: #991b1b;">{{ $unallocatedCount ?? 0 }}</div>
-    </div>
-</div>
 
 <div class="page-card">
     <div class="allocation-header">
@@ -180,7 +175,7 @@
 
     <div class="table-wrap">
         <table style="min-width: 900px;">
-                        <thead>
+            <thead>
                 <tr>
                     <th>Sr. No.</th>
                     <th>Class / Division</th>
@@ -190,7 +185,7 @@
                     <th>Status</th>
                 </tr>
             </thead>
-                        <tbody>
+            <tbody>
                 @forelse ($allocations as $index => $allocation)
                     <tr>
                         <td>{{ method_exists($allocations, 'firstItem') ? $allocations->firstItem() + $index : $index + 1 }}</td>
@@ -220,7 +215,7 @@
             </tbody>
         </table>
     </div>
-    
+
     @if(method_exists($allocations, 'links'))
         <div style="margin-top: 16px;">
             {{ $allocations->links() }}

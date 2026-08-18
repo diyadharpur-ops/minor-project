@@ -42,6 +42,21 @@ test('admin classroom allocation page loads without demo data', function () {
     ])->get('/admin/classroom-allocation')
         ->assertOk()
         ->assertSee('Classroom & Lab Allocation')
-        ->assertSee('No rooms added yet.')
-        ->assertSee('No allocations found.');
+        ->assertSee('Allocation Results')
+        ->assertSee('No allocation records found. Click Auto Generate to start.');
+
+    $response = $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/classroom-allocation');
+
+    $html = $response->getContent();
+    $firstIndex = mb_strpos($html, 'Classroom & Lab Allocation');
+    $secondIndex = mb_strpos($html, 'Allocation Results');
+
+    expect($firstIndex)->not->toBeFalse()
+        ->and($secondIndex)->not->toBeFalse()
+        ->and($firstIndex)->toBeLessThan($secondIndex);
 });
