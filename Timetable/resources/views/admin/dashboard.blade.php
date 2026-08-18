@@ -450,13 +450,20 @@
             </div>
 
             <div class="header-actions">
-                <button type="button" class="notification-button" aria-label="Notifications">
+                @php
+                    $unreadNotificationsCount = \App\Models\Notification::where('status', 'Unread')->count();
+                @endphp
+                <a href="/admin/notifications" class="notification-button" aria-label="Notifications" style="text-decoration: none;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5"/>
                         <path d="M10 20a2 2 0 0 0 4 0"/>
                     </svg>
-                    <span class="notification-dot"></span>
-                </button>
+                    @if($unreadNotificationsCount > 0)
+                        <span class="notification-dot" style="display: block;"></span>
+                    @else
+                        <span class="notification-dot" style="display: none;"></span>
+                    @endif
+                </a>
 
                 <div class="profile-summary" aria-label="Admin profile">
                     <div class="profile-avatar">AU</div>
@@ -660,16 +667,26 @@
             <div class="summary-panel">
                 <div class="panel-head">
                     <h3>System Alerts</h3>
-                    <a href="/admin/reports" class="panel-link">View All Alerts</a>
+                    <a href="/admin/notifications" class="panel-link">View All Alerts</a>
                 </div>
 
                 <ul class="alert-list">
-                    @foreach ($alerts as $alert)
+                    @php
+                        $recentAlerts = \App\Models\Notification::latest()->take(3)->get();
+                    @endphp
+                    @forelse ($recentAlerts as $alert)
                         <li>
-                            <span class="dot {{ $alert['type'] == 'success' ? 'success' : ($alert['type'] == 'warning' ? 'warning' : 'danger') }}"></span>
-                            <span>{{ $alert['text'] }}</span>
+                            <span class="dot {{ $alert->priority == 'High' ? 'danger' : ($alert->priority == 'Medium' ? 'warning' : 'success') }}"></span>
+                            <span class="text-truncate" style="max-width: 85%;">
+                                <strong>{{ $alert->title }}:</strong> {{ \Illuminate\Support\Str::limit($alert->description, 45) }}
+                            </span>
                         </li>
-                    @endforeach
+                    @empty
+                        <li>
+                            <span class="dot success"></span>
+                            <span>No system alerts yet.</span>
+                        </li>
+                    @endforelse
                 </ul>
             </div>
         </section>

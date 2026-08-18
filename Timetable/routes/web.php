@@ -1,13 +1,15 @@
 <?php
 
+use App\Http\Controllers\NotificationController;
 use App\Models\Classroom;
 use App\Models\Department;
 use App\Models\Faculty;
 use App\Models\FacultyWorkload;
 use App\Models\Notification;
+use App\Models\RoomAllocation;
 use App\Models\Subject;
+use App\Models\TimetableEntry;
 use App\Models\User;
-use App\Services\TimetableGenerator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
@@ -47,9 +49,9 @@ Route::get('/admin/dashboard', function () {
         'departments' => Department::count(),
         'faculty' => Faculty::count(),
         'subjects' => Subject::count(),
-        'classrooms' => \App\Models\Classroom::count(),
+        'classrooms' => Classroom::count(),
         'students' => User::count(),
-        'active_timetables' => \App\Models\TimetableEntry::select('department_id', 'semester', 'division', 'academic_year', 'term')
+        'active_timetables' => TimetableEntry::select('department_id', 'semester', 'division', 'academic_year', 'term')
             ->distinct()
             ->count(),
     ];
@@ -62,7 +64,7 @@ Route::match(['get', 'post'], '/admin/conflicts', function () {
         return redirect('/admin/login');
     }
 
-    $entries = \App\Models\TimetableEntry::with(['subject', 'faculty', 'classroom'])
+    $entries = TimetableEntry::with(['subject', 'faculty', 'classroom'])
         ->orderBy('day')
         ->orderBy('time_slot')
         ->get();
@@ -83,12 +85,12 @@ Route::match(['get', 'post'], '/admin/conflicts', function () {
 
     foreach ($entries as $entry) {
         if ($entry->faculty_id && $entry->day && $entry->time_slot) {
-            $key = $entry->faculty_id . '|' . $entry->day . '|' . $entry->time_slot;
+            $key = $entry->faculty_id.'|'.$entry->day.'|'.$entry->time_slot;
             $facultySlots[$key][] = $entry;
         }
 
         if ($entry->classroom_id && $entry->day && $entry->time_slot) {
-            $classroomKey = $entry->classroom_id . '|' . $entry->day . '|' . $entry->time_slot;
+            $classroomKey = $entry->classroom_id.'|'.$entry->day.'|'.$entry->time_slot;
             $classroomSlots[$classroomKey][] = $entry;
 
             if ($entry->classroom && str_contains(strtolower((string) $entry->classroom->room_type), 'lab')) {
@@ -97,7 +99,7 @@ Route::match(['get', 'post'], '/admin/conflicts', function () {
         }
 
         if ($entry->subject_id && $entry->day && $entry->time_slot) {
-            $subjectKey = $entry->subject_id . '|' . $entry->day . '|' . $entry->time_slot;
+            $subjectKey = $entry->subject_id.'|'.$entry->day.'|'.$entry->time_slot;
             $subjectSlots[$subjectKey][] = $entry;
         }
     }
@@ -193,6 +195,13 @@ Route::match(['get', 'post'], '/admin/conflicts', function () {
         ['title' => 'Same Subject Duplicate Slot', 'value' => $summary['duplicate_subject'], 'icon' => 'subject', 'subtext' => 'duplicate entries'],
     ];
 
+    if ($conflicts->count() > 0) {
+        Notification::trigger('Conflict Detected', [
+            'type' => $conflicts->first()['type'] ?? 'Scheduling',
+            'details' => "{$conflicts->count()} scheduling issues found.",
+        ]);
+    }
+
     return view('admin.conflicts', [
         'summaryCards' => $summaryCards,
         'conflicts' => $conflicts,
@@ -207,31 +216,32 @@ Route::get('/admin/profile', function () {
     return view('admin.profile');
 });
 
-Route::get('/admin/notifications', function () {
+Route::get('/admin/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+Route::post('/admin/notifications', [NotificationController::class, 'store'])->name('notifications.store');
+Route::get('/notifications/filter/{type}', [NotificationController::class, 'filter'])->name('notifications.filter');
+Route::get('/notifications/refresh', [NotificationController::class, 'refresh'])->name('notifications.refresh');
+Route::post('/notifications/read-all', [NotificationController::class, 'readAll'])->name('notifications.readAll');
+Route::delete('/notifications/clear', [NotificationController::class, 'clear'])->name('notifications.clear');
+Route::get('/admin/notifications/show/{id}', [NotificationController::class, 'show'])->name('notifications.show');
+Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead'])->name('notifications.markAsRead');
+Route::delete('/notifications/{id}', [NotificationController::class, 'destroy'])->name('notifications.destroy');
+
+Route::post('/admin/backup', function () {
     if (! session('admin.auth')) {
-        return redirect('/admin/login');
+        return response()->json(['error' => 'Unauthorized'], 401);
     }
+    Notification::trigger('Backup Completed');
 
-    $notifications = Notification::orderBy('created_at', 'desc')->get();
-
-    return view('admin.notifications.index', ['notifications' => $notifications]);
+    return response()->json(['success' => true, 'message' => 'System backup completed successfully and notification logged.']);
 });
 
-Route::post('/admin/notifications', function (Request $request) {
+Route::post('/admin/new-semester', function () {
     if (! session('admin.auth')) {
-        return redirect('/admin/login');
+        return response()->json(['error' => 'Unauthorized'], 401);
     }
+    Notification::trigger('New Semester Started');
 
-    $data = $request->validate([
-        'title' => 'required|string|max:255',
-        'type' => 'required|string|max:100',
-        'message' => 'required|string',
-        'audience' => 'required|string|in:student,faculty,all',
-    ]);
-
-    Notification::create($data);
-
-    return redirect('/admin/notifications');
+    return response()->json(['success' => true, 'message' => 'New academic semester started and timetables initialized.']);
 });
 
 // Timetable generation
@@ -257,12 +267,12 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
         $academicYear = request('academic_year');
         $term = request('term');
 
-        $entries = \App\Models\TimetableEntry::with(['subject', 'faculty', 'classroom'])
+        $entries = TimetableEntry::with(['subject', 'faculty', 'classroom'])
             ->where('department_id', $deptId)
             ->where('semester', $semester)
             ->where('division', $division)
             ->get();
-        
+
         $dept = Department::find($deptId);
         $deptName = $dept ? $dept->name : '';
 
@@ -286,7 +296,7 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
             'sessions' => $sessions,
             'academic_year' => $academicYear,
             'term' => $term,
-            'division' => $division
+            'division' => $division,
         ];
     }
 
@@ -296,8 +306,8 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
         'deptName' => $deptName,
         'semester' => request('semester'),
         'division' => request('division', 'A'),
-        'academicYear' => request('academic_year', date('Y').'-'.(date('Y')+1)),
-        'term' => request('term', 'Odd')
+        'academicYear' => request('academic_year', date('Y').'-'.(date('Y') + 1)),
+        'term' => request('term', 'Odd'),
     ]);
 });
 
@@ -316,7 +326,7 @@ Route::get('/admin/timetable/builder', function (Request $request) {
 
     $entries = collect([]);
     if ($request->has('department_id') && $request->has('semester') && $request->has('division')) {
-        $entries = \App\Models\TimetableEntry::where('department_id', $request->department_id)
+        $entries = TimetableEntry::where('department_id', $request->department_id)
             ->where('semester', $request->semester)
             ->where('division', $request->division)
             ->get();
@@ -336,7 +346,7 @@ Route::post('/admin/timetable/builder', function (Request $request) {
         'division' => 'required|string',
         'academic_year' => 'required|string',
         'term' => 'required|string',
-        'entries' => 'nullable|array'
+        'entries' => 'nullable|array',
     ]);
 
     // Validation: prevent duplicate faculty and room
@@ -345,38 +355,42 @@ Route::post('/admin/timetable/builder', function (Request $request) {
     $roomTimeSlots = [];
 
     foreach ($entriesData as $key => $entry) {
-        if (empty($entry['subject_id'])) continue; // skip empty cells
+        if (empty($entry['subject_id'])) {
+            continue;
+        } // skip empty cells
 
-        $daySlot = $entry['day'] . '_' . $entry['time_slot'];
+        $daySlot = $entry['day'].'_'.$entry['time_slot'];
 
-        if (!empty($entry['faculty_id'])) {
-            $facultySlot = $entry['faculty_id'] . '_' . $daySlot;
+        if (! empty($entry['faculty_id'])) {
+            $facultySlot = $entry['faculty_id'].'_'.$daySlot;
             if (isset($facultyTimeSlots[$facultySlot])) {
-                return back()->with('error', 'Duplicate faculty assignment detected for ' . $entry['day'] . ' at ' . $entry['time_slot'])->withInput();
+                return back()->with('error', 'Duplicate faculty assignment detected for '.$entry['day'].' at '.$entry['time_slot'])->withInput();
             }
             $facultyTimeSlots[$facultySlot] = true;
         }
 
-        if (!empty($entry['classroom_id'])) {
-            $roomSlot = $entry['classroom_id'] . '_' . $daySlot;
+        if (! empty($entry['classroom_id'])) {
+            $roomSlot = $entry['classroom_id'].'_'.$daySlot;
             if (isset($roomTimeSlots[$roomSlot])) {
-                return back()->with('error', 'Duplicate room assignment detected for ' . $entry['day'] . ' at ' . $entry['time_slot'])->withInput();
+                return back()->with('error', 'Duplicate room assignment detected for '.$entry['day'].' at '.$entry['time_slot'])->withInput();
             }
             $roomTimeSlots[$roomSlot] = true;
         }
     }
 
     // Delete existing entries for this class
-    \App\Models\TimetableEntry::where('department_id', $data['department_id'])
+    TimetableEntry::where('department_id', $data['department_id'])
         ->where('semester', $data['semester'])
         ->where('division', $data['division'])
         ->delete();
 
     // Insert new entries
     foreach ($entriesData as $key => $entry) {
-        if (empty($entry['subject_id'])) continue;
+        if (empty($entry['subject_id'])) {
+            continue;
+        }
 
-        \App\Models\TimetableEntry::create([
+        TimetableEntry::create([
             'department_id' => $data['department_id'],
             'semester' => $data['semester'],
             'division' => $data['division'],
@@ -389,8 +403,34 @@ Route::post('/admin/timetable/builder', function (Request $request) {
             'classroom_id' => $entry['classroom_id'] ?: null,
             'lecture_type' => $entry['lecture_type'] ?: null,
             'duration' => $entry['duration'] ?? 1,
-            'notes' => null
+            'notes' => null,
         ]);
+    }
+
+    // Trigger Timetable Generated & Faculty Assigned & Academic Year Changed
+    $dept = Department::find($data['department_id']);
+    Notification::trigger('Timetable Generated', [
+        'department_name' => $dept ? $dept->name : 'Department',
+        'semester' => $data['semester'],
+        'academic_year' => $data['academic_year'],
+    ]);
+
+    // Simple check: if this was the first entry saved for this academic year, trigger year change
+    if (TimetableEntry::where('academic_year', $data['academic_year'])->count() <= count($entriesData)) {
+        Notification::trigger('Academic Year Changed', [
+            'academic_year' => $data['academic_year'],
+        ]);
+    }
+
+    $assignedFaculties = collect($entriesData)->pluck('faculty_id')->filter()->unique();
+    foreach ($assignedFaculties as $facId) {
+        $fac = Faculty::find($facId);
+        if ($fac) {
+            Notification::trigger('Faculty Assigned', [
+                'faculty_name' => $fac->name,
+                'subject_name' => 'assigned timetable slots',
+            ]);
+        }
     }
 
     return redirect('/admin/timetable/builder?department_id='.$data['department_id'].'&semester='.$data['semester'].'&division='.$data['division'].'&academic_year='.$data['academic_year'].'&term='.$data['term'])->with('status', 'Timetable saved successfully!');
@@ -443,7 +483,9 @@ Route::post('/admin/departments', function (Request $request) {
         'hod_name' => 'nullable|string|max:255',
     ]);
 
-    Department::create($data);
+    $dept = Department::create($data);
+
+    Notification::trigger('Department Added', ['name' => $dept->name]);
 
     return redirect('/admin/departments');
 });
@@ -529,6 +571,8 @@ Route::post('/admin/faculties', function (Request $request) {
     ]);
 
     $faculty = Faculty::create($data);
+
+    Notification::trigger('Faculty Added', ['name' => $faculty->name]);
 
     if ($department = Department::find($data['department_id'])) {
         $folder = 'faculty-records/'.Str::slug($department->name);
@@ -627,7 +671,7 @@ Route::get('/admin/faculty-workload', function (Request $request) {
     if ($search !== '') {
         $query->where(function ($q) use ($search) {
             $q->where('faculty_name', 'like', '%'.$search.'%')
-              ->orWhere('faculty_id', 'like', '%'.$search.'%');
+                ->orWhere('faculty_id', 'like', '%'.$search.'%');
         });
     }
 
@@ -686,7 +730,14 @@ Route::post('/admin/faculty-workload', function (Request $request) {
     $normalThreshold = (int) config('faculty_workload.normal_threshold', 18);
     $data['workload_status'] = $totalHours > $normalThreshold ? 'Overloaded' : 'Normal';
 
-    FacultyWorkload::create($data);
+    $fw = FacultyWorkload::create($data);
+
+    if ($fw->workload_status === 'Overloaded') {
+        Notification::trigger('Faculty Workload Exceeded', [
+            'faculty_name' => $fw->faculty_name,
+            'total_hours' => $fw->total_hours,
+        ]);
+    }
 
     return redirect('/admin/faculty-workload')->with('status', 'Faculty workload saved successfully.');
 });
@@ -735,6 +786,13 @@ Route::post('/admin/faculty-workload/{id}', function (Request $request, $id) {
     $data['workload_status'] = $totalHours > $normalThreshold ? 'Overloaded' : 'Normal';
 
     $workload->update($data);
+
+    if ($workload->workload_status === 'Overloaded') {
+        Notification::trigger('Faculty Workload Exceeded', [
+            'faculty_name' => $workload->faculty_name,
+            'total_hours' => $workload->total_hours,
+        ]);
+    }
 
     return redirect('/admin/faculty-workload')->with('status', 'Faculty workload updated successfully.');
 });
@@ -975,49 +1033,49 @@ Route::post('/admin/classrooms/{id}/delete', function ($id) {
     return redirect('/admin/classrooms');
 });
 
-Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminate\Http\Request $request) {
+Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $request) {
     if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
-    $allocations = \App\Models\RoomAllocation::with(['department', 'subject', 'classroom'])
+    $allocations = RoomAllocation::with(['department', 'subject', 'classroom'])
         ->orderBy('id', 'desc')
         ->paginate(10);
 
-    $totalSubjects = \App\Models\RoomAllocation::count();
-    $allocatedClassroomCount = \App\Models\RoomAllocation::where('status', 'Allocated')
+    $totalSubjects = RoomAllocation::count();
+    $allocatedClassroomCount = RoomAllocation::where('status', 'Allocated')
         ->whereHas('subject', function ($query) {
             $query->where('subject_type', 'not like', '%lab%')
-                  ->where('subject_type', 'not like', '%practical%');
+                ->where('subject_type', 'not like', '%practical%');
         })->count();
-    $allocatedLabCount = \App\Models\RoomAllocation::where('status', 'Allocated')
+    $allocatedLabCount = RoomAllocation::where('status', 'Allocated')
         ->whereHas('subject', function ($query) {
             $query->where('subject_type', 'like', '%lab%')
-                  ->orWhere('subject_type', 'like', '%practical%');
+                ->orWhere('subject_type', 'like', '%practical%');
         })->count();
-    $unallocatedCount = \App\Models\RoomAllocation::where('status', 'Unallocated')->count();
-    
+    $unallocatedCount = RoomAllocation::where('status', 'Unallocated')->count();
+
     $allocationStatus = null;
 
     if ($request->isMethod('post')) {
         if ($request->input('form_type') === 'auto-allocate' || $request->input('form_type') === 're-generate') {
-            
+
             // Re-generate or clear existing for a clean state
-            \App\Models\RoomAllocation::query()->delete();
+            RoomAllocation::query()->delete();
 
             // 1. Check if Subjects exist
-            $subjectCountCheck = \App\Models\Subject::count();
+            $subjectCountCheck = Subject::count();
             if ($subjectCountCheck === 0) {
                 return back()->withErrors(['auto' => 'No subjects found for the selected academic year/semester.']);
             }
 
             // 2. Check if Classrooms and Labs exist
-            $classrooms = \App\Models\Classroom::where('availability', 'Available')
+            $classrooms = Classroom::where('availability', 'Available')
                 ->orderBy('room_capacity', 'asc')
                 ->get();
 
             if ($classrooms->isEmpty()) {
-                $totalRooms = \App\Models\Classroom::count();
+                $totalRooms = Classroom::count();
                 if ($totalRooms === 0) {
                     return back()->withErrors(['auto' => 'No classrooms available. Please add classrooms first.']);
                 } else {
@@ -1026,7 +1084,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
             }
 
             // 3. Find base classes from Subjects
-            $baseClasses = \App\Models\Subject::select('department_id', 'semester')
+            $baseClasses = Subject::select('department_id', 'semester')
                 ->groupBy('department_id', 'semester')
                 ->get();
 
@@ -1034,11 +1092,13 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
 
             // 4. Derive divisions from Student records if they exist
             foreach ($baseClasses as $base) {
-                $dept = \App\Models\Department::find($base->department_id);
-                if (!$dept) continue;
+                $dept = Department::find($base->department_id);
+                if (! $dept) {
+                    continue;
+                }
 
                 // Check student records for divisions
-                $divisions = \App\Models\User::whereNotNull('enrollment_number')
+                $divisions = User::whereNotNull('enrollment_number')
                     ->where('department', $dept->name)
                     ->where('semester', $base->semester)
                     ->whereNotNull('divcon')
@@ -1054,7 +1114,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
                         'department_name' => $dept->name,
                         'semester' => $base->semester,
                         'division' => null,
-                        'class_name' => $dept->name . '-' . $base->semester
+                        'class_name' => $dept->name.'-'.$base->semester,
                     ];
                 } else {
                     // Split into multiple class groups based on divisions
@@ -1064,7 +1124,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
                             'department_name' => $dept->name,
                             'semester' => $base->semester,
                             'division' => $div,
-                            'class_name' => $dept->name . '-' . $base->semester . '-' . $div
+                            'class_name' => $dept->name.'-'.$base->semester.'-'.$div,
                         ];
                     }
                 }
@@ -1098,7 +1158,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
 
             foreach ($allocationGroups as $group) {
                 // Calculate Student Strength
-                $query = \App\Models\User::whereNotNull('enrollment_number')
+                $query = User::whereNotNull('enrollment_number')
                     ->where('department', $group['department_name'])
                     ->where('semester', $group['semester']);
 
@@ -1111,7 +1171,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
                 $usedRoomIds = [];
 
                 // Find Subjects
-                $subjects = \App\Models\Subject::where('department_id', $group['department_id'])
+                $subjects = Subject::where('department_id', $group['department_id'])
                     ->where('semester', $group['semester'])
                     ->get();
 
@@ -1193,7 +1253,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
 
                         $formattedRooms = implode(' + ', $selectedRoomNumbers);
 
-                        \App\Models\RoomAllocation::create([
+                        RoomAllocation::create([
                             'department_id' => $group['department_id'],
                             'semester' => $group['semester'],
                             'subject_id' => $subject->id,
@@ -1214,7 +1274,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
                             $countAllocatedClassrooms++;
                         }
                     } else {
-                        \App\Models\RoomAllocation::create([
+                        RoomAllocation::create([
                             'department_id' => $group['department_id'],
                             'semester' => $group['semester'],
                             'subject_id' => $subject->id,
@@ -1235,6 +1295,18 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
 
             $actionName = $request->input('form_type') === 're-generate' ? 'Re-Generation' : 'Auto Allocation';
             $allocationStatus = "{$actionName} complete: {$countAllocatedClassrooms} Classroom(s) allocated, {$countAllocatedLabs} Lab(s) allocated, {$countUnallocated} unallocated.";
+
+            // Trigger notifications for Classroom/Lab Allocation and Subject Unassigned
+            if ($countAllocatedClassrooms > 0) {
+                Notification::trigger('Classroom Allocation Completed', ['count' => $countAllocatedClassrooms]);
+            }
+            if ($countAllocatedLabs > 0) {
+                Notification::trigger('Lab Allocation Completed', ['count' => $countAllocatedLabs]);
+            }
+            if ($countUnallocated > 0) {
+                Notification::trigger('Subject Not Assigned', ['subject_name' => "Multiple ({$countUnallocated} subjects)"]);
+            }
+
             // 17. Display Allocation Results
             return redirect('/admin/classroom-allocation')->with('allocation_status', $allocationStatus);
         }
@@ -1267,7 +1339,7 @@ Route::get('/admin/classroom-allocation/{id}/edit-allocation', function ($id) {
         return redirect('/admin/login');
     }
 
-    $allocation = \App\Models\RoomAllocation::with(['department', 'subject', 'faculty', 'classroom'])->findOrFail($id);
+    $allocation = RoomAllocation::with(['department', 'subject', 'faculty', 'classroom'])->findOrFail($id);
 
     return view('admin.classrooms.allocation-edit', [
         'allocation' => $allocation,
@@ -1283,7 +1355,7 @@ Route::post('/admin/classroom-allocation/{id}/update-allocation', function (Requ
         return redirect('/admin/login');
     }
 
-    $allocation = \App\Models\RoomAllocation::findOrFail($id);
+    $allocation = RoomAllocation::findOrFail($id);
 
     $data = $request->validate([
         'department_id' => 'required|integer|exists:departments,id',
@@ -1300,6 +1372,12 @@ Route::post('/admin/classroom-allocation/{id}/update-allocation', function (Requ
 
     $room = Classroom::findOrFail($data['room_id']);
     if ((int) $room->room_capacity < (int) $data['student_count']) {
+        Notification::trigger('Classroom Capacity Exceeded', [
+            'room_number' => $room->room_number,
+            'capacity' => $room->room_capacity,
+            'student_count' => $data['student_count'],
+        ]);
+
         return back()->withErrors(['student_count' => 'Selected room capacity is lower than the student count.'])->withInput();
     }
 
@@ -1324,7 +1402,7 @@ Route::post('/admin/classroom-allocation/{id}/delete-allocation', function ($id)
         return redirect('/admin/login');
     }
 
-    $allocation = \App\Models\RoomAllocation::find($id);
+    $allocation = RoomAllocation::find($id);
     if ($allocation) {
         $allocation->delete();
     }
@@ -1350,7 +1428,7 @@ Route::post('/student/register', function (Request $request) {
         'password' => 'required|string|min:8|confirmed',
     ]);
 
-    User::create([
+    $student = User::create([
         'name' => $data['name'],
         'enrollment_number' => $data['enrollment_number'],
         'email' => $data['email'],
@@ -1360,6 +1438,8 @@ Route::post('/student/register', function (Request $request) {
         'divcon' => $data['divcon'] ?? null,
         'password' => Hash::make($data['password']),
     ]);
+
+    Notification::trigger('Student Added', ['name' => $student->name]);
 
     return redirect('/')->with('student_register_success', '✓ Registration Successful! Your student account has been created successfully. You can now login using your Enrollment Number and Password.');
 });
@@ -1458,7 +1538,7 @@ Route::middleware(['web'])->group(function () {
             $student->delete();
 
             return redirect('/admin/students')->with('status', 'Student deleted successfully.');
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             return back()->with('error', 'Unable to delete student. Please try again.');
         }
     });
@@ -1545,6 +1625,7 @@ Route::middleware(['web'])->group(function () {
         if (! session('faculty.auth')) {
             return redirect('/')->with('error', 'Please login to continue.');
         }
+
         return view('faculty.dashboard');
     });
 
@@ -1552,6 +1633,7 @@ Route::middleware(['web'])->group(function () {
         if (! session('faculty.auth')) {
             return redirect('/')->with('error', 'Please login to continue.');
         }
+
         return view('faculty.timetable');
     });
 
@@ -1616,4 +1698,3 @@ Route::middleware(['web'])->group(function () {
         return redirect('/')->with('status', 'You have been logged out.');
     });
 });
-
