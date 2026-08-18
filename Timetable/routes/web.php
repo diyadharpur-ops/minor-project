@@ -1076,18 +1076,39 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
 
             // To avoid assigning the same room to multiple subjects if possible
             // though without time, there's no real "conflict". We just assign one to each.
+            $normalizeRoomType = function ($roomType) {
+                $value = strtolower(trim((string) ($roomType ?? '')));
+
+                if (str_contains($value, 'lab') || str_contains($value, 'practical')) {
+                    return 'Lab';
+                }
+
+                return 'Classroom';
+            };
+
+            $normalizeSubjectType = function ($subjectType) {
+                $value = strtolower(trim((string) ($subjectType ?? 'Classroom')));
+
+                if (str_contains($value, 'lab') || str_contains($value, 'practical')) {
+                    return 'Lab';
+                }
+
+                return 'Classroom';
+            };
+
             foreach ($allocationGroups as $group) {
                 // Calculate Student Strength
                 $query = \App\Models\User::whereNotNull('enrollment_number')
                     ->where('department', $group['department_name'])
                     ->where('semester', $group['semester']);
-                
+
                 if ($group['division']) {
                     $query->where('divcon', $group['division']);
                 }
 
                 $studentStrength = $query->count();
-                $capacityToUse = $studentStrength > 0 ? $studentStrength : 60; // Fallback capacity
+                $capacityToUse = max(1, (int) ($studentStrength > 0 ? $studentStrength : 60));
+                $usedRoomIds = [];
 
                 // Find Subjects
                 $subjects = \App\Models\Subject::where('department_id', $group['department_id'])
@@ -1095,37 +1116,98 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Illuminat
                     ->get();
 
                 foreach ($subjects as $subject) {
-                    $isLab = str_contains(strtolower($subject->subject_type), 'lab') || str_contains(strtolower($subject->subject_type), 'practical');
-                    
-                    // Filter suitable rooms
-                    $suitableRooms = $classrooms->filter(function ($room) use ($capacityToUse, $isLab) {
-                        if ((int) $room->room_capacity < $capacityToUse) return false;
+                    $requiredRoomType = $normalizeSubjectType($subject->subject_type ?? 'Classroom');
+                    $isLab = $requiredRoomType === 'Lab';
+                    $selectedRoomIds = [];
+                    $selectedRoomNumbers = [];
+                    $remainingRequiredCapacity = $capacityToUse;
 
-                        $isRoomLab = str_contains(strtolower($room->room_type), 'lab');
-                        if ($isLab && !$isRoomLab) return false;
-                        if (!$isLab && $isRoomLab) return false;
+                    if ($isLab) {
+                        $labRooms = $classrooms
+                            ->filter(function ($room) use ($usedRoomIds, $normalizeRoomType, $requiredRoomType) {
+                                if ($room->availability !== 'Available') {
+                                    return false;
+                                }
 
-                        return true;
-                    });
+                                if ((int) $room->room_capacity <= 0) {
+                                    return false;
+                                }
 
-                    // To add basic variance, we pick the first suitable, or maybe pick randomly
-                    $allocatedRoom = $suitableRooms->first();
+                                if ($normalizeRoomType($room->room_type) !== $requiredRoomType) {
+                                    return false;
+                                }
 
-                    if ($allocatedRoom) {
+                                return ! isset($usedRoomIds[$room->id]);
+                            })
+                            ->sortBy(function ($room) {
+                                return (int) $room->room_capacity;
+                            })
+                            ->values();
+
+                        foreach ($labRooms as $room) {
+                            if ($remainingRequiredCapacity <= 0) {
+                                break;
+                            }
+
+                            $selectedRoomIds[] = $room->id;
+                            $selectedRoomNumbers[] = $room->room_number;
+                            $remainingRequiredCapacity -= (int) $room->room_capacity;
+                        }
+
+                        if ($remainingRequiredCapacity > 0) {
+                            $selectedRoomIds = [];
+                            $selectedRoomNumbers = [];
+                        }
+                    } else {
+                        $classroomRoom = $classrooms
+                            ->filter(function ($room) use ($usedRoomIds, $normalizeRoomType, $requiredRoomType, $capacityToUse) {
+                                if ($room->availability !== 'Available') {
+                                    return false;
+                                }
+
+                                if ((int) $room->room_capacity < $capacityToUse) {
+                                    return false;
+                                }
+
+                                if ($normalizeRoomType($room->room_type) !== $requiredRoomType) {
+                                    return false;
+                                }
+
+                                return ! isset($usedRoomIds[$room->id]);
+                            })
+                            ->sortByDesc(function ($room) {
+                                return (int) $room->room_capacity;
+                            })
+                            ->first();
+
+                        if ($classroomRoom) {
+                            $selectedRoomIds = [$classroomRoom->id];
+                            $selectedRoomNumbers = [$classroomRoom->room_number];
+                        }
+                    }
+
+                    if (! empty($selectedRoomIds) && ! empty($selectedRoomNumbers)) {
+                        foreach ($selectedRoomIds as $roomId) {
+                            $usedRoomIds[$roomId] = true;
+                        }
+
+                        $formattedRooms = implode(' + ', $selectedRoomNumbers);
+
                         \App\Models\RoomAllocation::create([
                             'department_id' => $group['department_id'],
                             'semester' => $group['semester'],
                             'subject_id' => $subject->id,
-                            'faculty_id' => null, // No faculty logic
-                            'classroom_id' => $allocatedRoom->id,
+                            'faculty_id' => null,
+                            'classroom_id' => $selectedRoomIds[0] ?? null,
                             'class_name' => $group['class_name'],
                             'student_count' => $capacityToUse,
                             'day' => '-',
                             'start_time' => null,
                             'end_time' => null,
                             'status' => 'Allocated',
-                            'notes' => '-',
+                            'notes' => $formattedRooms,
                         ]);
+
                         if ($isLab) {
                             $countAllocatedLabs++;
                         } else {

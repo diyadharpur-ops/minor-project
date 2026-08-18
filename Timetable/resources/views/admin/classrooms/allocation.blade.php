@@ -200,7 +200,7 @@
                                 {{ $isLab ? 'Lab' : 'Classroom' }}
                             </span>
                         </td>
-                        <td>{{ $allocation->classroom?->room_number ?? '—' }}</td>
+                        <td>{{ $allocation->notes ?: ($allocation->classroom?->room_number ?? '—') }}</td>
                         <td>
                             @if($allocation->status == 'Allocated')
                                 <span class="badge badge-allocated">Allocated</span>
