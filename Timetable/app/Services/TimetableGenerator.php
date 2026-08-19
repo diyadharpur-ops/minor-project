@@ -2,282 +2,268 @@
 
 namespace App\Services;
 
+use App\Models\Subject;
+use App\Models\Faculty;
+use App\Models\Classroom;
+use App\Models\TimetableEntry;
+use App\Models\Department;
+use App\Models\Notification;
+use App\Models\FacultyWorkload;
+use Exception;
+
 class TimetableGenerator
 {
-    public function generate(string $semester, array $days, array $timeSlots, array $subjects, array $faculties, array $classrooms): array
+    // College Timings based on requirements
+    protected $timeSlots = [
+        '10:30-11:30', // Slot 0
+        '11:30-12:30', // Slot 1
+        // Lunch Break 12:30 PM - 1:00 PM
+        '01:00-02:00', // Slot 2
+        '02:00-03:00', // Slot 3
+        // Tea Break 3:00 PM - 3:10 PM
+        '03:10-04:10', // Slot 4
+        '04:10-05:10', // Slot 5
+    ];
+    
+    protected $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    public function generate($deptId, $semester, $division, $academicYear, $term)
     {
-        $facultyMap = [];
-        foreach ($faculties as $faculty) {
-            $facultyMap[$faculty['name']] = $faculty;
+        // Check if classrooms exist globally (since classrooms do not have department_id in schema)
+        $classrooms = Classroom::all();
+        if ($classrooms->isEmpty()) {
+            throw new Exception("No classrooms found in the database. Please add classrooms before generating.");
         }
 
-        $theoryRooms = array_values(array_filter($classrooms, fn ($room) => $this->isTheoryRoom($room)));
-        $labRooms = array_values(array_filter($classrooms, fn ($room) => $this->isLabRoom($room)));
+        // Delete existing entries for this specific class
+        TimetableEntry::where([
+            'department_id' => $deptId,
+            'semester' => $semester,
+            'division' => $division
+        ])->delete();
 
-        $sessions = [];
-        $used = [];
-        $subjectLoad = [];
+        $subjects = Subject::where('department_id', $deptId)->where('semester', $semester)->get();
+        if ($subjects->isEmpty()) {
+            return false;
+        }
 
-        $subjects = array_values(array_filter($subjects, fn ($subject) => (string) ($subject['semester'] ?? '') === (string) $semester));
-        usort($subjects, function ($a, $b) {
-            $aHours = (int) (($a['theory_hours'] ?? 0) + ($a['practical_hours'] ?? 0));
-            $bHours = (int) (($b['theory_hours'] ?? 0) + ($b['practical_hours'] ?? 0));
+        $allFaculty = Faculty::where('department_id', $deptId)->get();
+        if ($allFaculty->isEmpty()) {
+            $allFaculty = Faculty::all(); // Fallback if no faculty mapped to department
+        }
 
-            return $bHours <=> $aHours;
-        });
+        // Separate lecture rooms and labs
+        $lectureRooms = $classrooms->filter(fn($c) => stripos($c->room_type, 'lab') === false)->values();
+        $labRooms = $classrooms->filter(fn($c) => stripos($c->room_type, 'lab') !== false)->values();
+        
+        // Fallbacks if strictly named 'lab' doesn't exist
+        if ($lectureRooms->isEmpty()) {
+            $lectureRooms = $classrooms;
+        }
+        if ($labRooms->isEmpty()) {
+            $labRooms = $classrooms; // Very rare, but prevents failure if no labs defined
+        }
+
+        // Build occupancy maps to prevent conflicts globally
+        // format: $facultyOccupied[faculty_id][day][time_slot] = true
+        $facultyOccupied = [];
+        $roomOccupied = [];
+
+        $existingEntries = TimetableEntry::all();
+        foreach ($existingEntries as $entry) {
+            $slotsToMark = [$entry->time_slot];
+            if ($entry->duration == 2) {
+                $idx = array_search($entry->time_slot, $this->timeSlots);
+                if ($idx !== false && isset($this->timeSlots[$idx + 1])) {
+                    $slotsToMark[] = $this->timeSlots[$idx + 1];
+                }
+            }
+
+            foreach ($slotsToMark as $s) {
+                if ($entry->faculty_id) {
+                    $facultyOccupied[$entry->faculty_id][$entry->day][$s] = true;
+                }
+                if ($entry->classroom_id) {
+                    $roomOccupied[$entry->classroom_id][$entry->day][$s] = true;
+                }
+            }
+        }
+
+        // Helper to find faculty based on subject name
+        $getFaculty = function($subject) use ($allFaculty) {
+            if ($allFaculty->isEmpty()) return null;
+            if ($subject->faculty_name) {
+                $f = $allFaculty->first(fn($fac) => stripos($fac->name, $subject->faculty_name) !== false);
+                if ($f) return $f;
+            }
+            $f = $allFaculty->first(function($fac) use ($subject) {
+                return $fac->subjects && stripos($fac->subjects, $subject->name) !== false;
+            });
+            if ($f) return $f;
+            
+            return $allFaculty->random();
+        };
+
+        $assignments = [];
 
         foreach ($subjects as $subject) {
-            $type = $this->resolveType($subject);
-            $hours = $type === 'lab' ? (int) ($subject['practical_hours'] ?? 0) : (int) ($subject['theory_hours'] ?? 0);
-            $faculty = $facultyMap[$subject['faculty_name']] ?? null;
+            $faculty = $getFaculty($subject);
+            
+            // Determine weekly requirements dynamically
+            // Theory = credit hours (fallback to 3)
+            // If subject_type is practical, we assign more labs, otherwise 1 lab.
+            $isPracticalSubject = stripos($subject->subject_type ?? '', 'practical') !== false || stripos($subject->subject_type ?? '', 'lab') !== false;
+            
+            $theoryCount = $isPracticalSubject ? 0 : max($subject->credit ?? 3, 2);
+            $practicalCount = $isPracticalSubject ? max($subject->credit ?? 2, 2) : 1; 
 
-            if (! $faculty) {
-                continue;
+            // Assign Theory Lectures
+            for ($i = 0; $i < $theoryCount; $i++) {
+                $this->assignSlot($assignments, 'Theory', 1, $subject, $faculty, $lectureRooms, $facultyOccupied, $roomOccupied, $deptId, $semester, $division, $academicYear, $term);
             }
-
-            if ($type === 'lab') {
-                $this->addLabSessions($sessions, $used, $subject, $faculty, $labRooms, $days, $timeSlots);
-                continue;
+            
+            // Assign Lab Practicals
+            for ($i = 0; $i < $practicalCount; $i++) {
+                $this->assignSlot($assignments, 'Practical', 2, $subject, $faculty, $labRooms, $facultyOccupied, $roomOccupied, $deptId, $semester, $division, $academicYear, $term);
             }
-
-            $this->addTheorySessions($sessions, $used, $subject, $faculty, $theoryRooms, $days, $timeSlots, $hours);
+        }
+        
+        // Save to existing timetable_entries table directly
+        foreach ($assignments as $a) {
+            TimetableEntry::create($a);
         }
 
-        return [
-            'semester' => $semester,
-            'days' => $days,
-            'time_slots' => $timeSlots,
-            'sessions' => $sessions,
-        ];
+        $dept = Department::find($deptId);
+        if ($dept) {
+            Notification::trigger('Timetable Generated', [
+                'department_name' => $dept->name,
+                'semester' => $semester,
+                'academic_year' => $academicYear,
+            ]);
+        }
+        
+        return true;
     }
 
-    private function addTheorySessions(array &$sessions, array &$used, array $subject, array $faculty, array $rooms, array $days, array $timeSlots, int $hours): void
-    {
-        $availableRooms = array_values(array_filter($rooms, function (array $room): bool {
-            return $this->isRoomAvailable($room);
-        }));
-
-        if ($availableRooms === []) {
-            return;
-        }
-
-        for ($i = 0; $i < $hours; $i++) {
-            $room = $this->pickBestRoom($availableRooms, $used, $days, $timeSlots);
-            if ($room === null) {
-                break;
+    /**
+     * Attempts to find a valid non-conflicting slot and assigns it.
+     */
+    private function assignSlot(&$assignments, $type, $duration, $subject, $faculty, $rooms, &$facultyOccupied, &$roomOccupied, $deptId, $semester, $division, $academicYear, $term) {
+        $maxAttempts = 500;
+        
+        for ($attempts = 0; $attempts < $maxAttempts; $attempts++) {
+            $day = $this->days[array_rand($this->days)];
+            
+            if ($duration == 2) {
+                // Lab practicals: 2 consecutive hours without crossing breaks
+                // Valid start indices: 0 (10:30), 2 (01:00), 4 (03:10)
+                $validStarts = [0, 2, 4];
+                $startIndex = $validStarts[array_rand($validStarts)];
+                $slots = [$this->timeSlots[$startIndex], $this->timeSlots[$startIndex + 1]];
+            } else {
+                // Theory lecture: 1 hour
+                $startIndex = array_rand($this->timeSlots);
+                $slots = [$this->timeSlots[$startIndex]];
             }
 
-            [$day, $slot] = $this->findNextAvailableSlot($used, $days, $timeSlots, $faculty['name'], $room['room_number']);
+            $room = $rooms->isNotEmpty() ? $rooms->random() : null;
+            $roomId = $room ? $room->id : null;
+            $facultyId = $faculty ? $faculty->id : null;
 
-            if ($day === null || $slot === null) {
-                break;
-            }
-
-            $sessions[] = [
-                'subject' => $subject['name'],
-                'faculty' => $faculty['name'],
-                'room' => $room['room_number'],
-                'day' => $day,
-                'time_slot' => $slot,
-                'type' => 'theory',
-            ];
-
-            $used[$this->makeKey($faculty['name'], $day, $slot)] = true;
-            $used[$this->makeKey($room['room_number'], $day, $slot)] = true;
-            $used[$this->makeKey($subject['name'], $day, $slot)] = true;
-        }
-    }
-
-    private function addLabSessions(array &$sessions, array &$used, array $subject, array $faculty, array $rooms, array $days, array $timeSlots): void
-    {
-        $availableRooms = array_values(array_filter($rooms, function (array $room): bool {
-            return $this->isRoomAvailable($room);
-        }));
-
-        if ($availableRooms === []) {
-            return;
-        }
-
-        $room = $this->pickBestRoom($availableRooms, $used, $days, $timeSlots);
-        if ($room === null) {
-            return;
-        }
-
-        [$day, $slot] = $this->findNextAvailableLabSlot($used, $days, $timeSlots, $faculty['name'], $room['room_number']);
-
-        if ($day === null || $slot === null) {
-            return;
-        }
-
-        $nextSlot = $this->nextSlot($timeSlots, $slot);
-        if ($nextSlot === null) {
-            return;
-        }
-
-        $sessions[] = [
-            'subject' => $subject['name'],
-            'faculty' => $faculty['name'],
-            'room' => $room['room_number'],
-            'day' => $day,
-            'time_slot' => $slot,
-            'end_time_slot' => $nextSlot,
-            'type' => 'lab',
-        ];
-
-        $used[$this->makeKey($faculty['name'], $day, $slot)] = true;
-        $used[$this->makeKey($faculty['name'], $day, $nextSlot)] = true;
-        $used[$this->makeKey($room['room_number'], $day, $slot)] = true;
-        $used[$this->makeKey($room['room_number'], $day, $nextSlot)] = true;
-        $used[$this->makeKey($subject['name'], $day, $slot)] = true;
-        $used[$this->makeKey($subject['name'], $day, $nextSlot)] = true;
-    }
-
-    private function findNextAvailableSlot(array $used, array $days, array $timeSlots, string $faculty, string $room): array
-    {
-        $bestDay = null;
-        $bestSlot = null;
-        $bestScore = null;
-
-        foreach ($days as $day) {
-            foreach ($timeSlots as $slot) {
-                if (isset($used[$this->makeKey($faculty, $day, $slot)]) || isset($used[$this->makeKey($room, $day, $slot)])) {
-                    continue;
-                }
-
-                $score = $this->dayLoadScore($used, $day);
-                if ($bestScore === null || $score < $bestScore) {
-                    $bestScore = $score;
-                    $bestDay = $day;
-                    $bestSlot = $slot;
-                }
-            }
-        }
-
-        return [$bestDay, $bestSlot];
-    }
-
-    private function pickBestRoom(array $rooms, array $used, array $days, array $timeSlots): ?array
-    {
-        $bestRoom = null;
-        $bestScore = null;
-
-        foreach ($rooms as $room) {
-            $score = 0;
-            foreach ($days as $day) {
-                foreach ($timeSlots as $slot) {
-                    if (isset($used[$this->makeKey($room['room_number'], $day, $slot)])) {
-                        $score++;
+            // Constraint 1: Division/Class Conflict (No duplicate lecture for same class at same time)
+            $classConflict = false;
+            foreach ($assignments as $a) {
+                if ($a['day'] == $day) {
+                    $aSlots = [$a['time_slot']];
+                    if ($a['duration'] == 2) {
+                        $idx = array_search($a['time_slot'], $this->timeSlots);
+                        if ($idx !== false && isset($this->timeSlots[$idx + 1])) {
+                            $aSlots[] = $this->timeSlots[$idx + 1];
+                        }
+                    }
+                    if (array_intersect($slots, $aSlots)) {
+                        $classConflict = true; 
+                        break;
                     }
                 }
             }
+            if ($classConflict) continue;
 
-            if ($bestScore === null || $score < $bestScore) {
-                $bestScore = $score;
-                $bestRoom = $room;
-            }
-        }
-
-        return $bestRoom;
-    }
-
-    private function findNextAvailableLabSlot(array $used, array $days, array $timeSlots, string $faculty, string $room): array
-    {
-        $bestDay = null;
-        $bestSlot = null;
-        $bestScore = null;
-
-        foreach ($days as $day) {
-            foreach ($timeSlots as $index => $slot) {
-                $nextSlot = $this->nextSlot($timeSlots, $slot);
-                if ($nextSlot === null) {
-                    continue;
+            // Constraint 2: Faculty Conflict (Faculty cannot teach two classes at same time)
+            $facConflict = false;
+            if ($facultyId) {
+                foreach ($slots as $s) {
+                    if (isset($facultyOccupied[$facultyId][$day][$s])) {
+                        $facConflict = true; 
+                        break;
+                    }
                 }
-
-                $isFree = ! isset($used[$this->makeKey($faculty, $day, $slot)])
-                    && ! isset($used[$this->makeKey($faculty, $day, $nextSlot)])
-                    && ! isset($used[$this->makeKey($room, $day, $slot)])
-                    && ! isset($used[$this->makeKey($room, $day, $nextSlot)]);
-
-                if (! $isFree) {
-                    continue;
-                }
-
-                $score = $this->dayLoadScore($used, $day);
-                if ($bestScore === null || $score < $bestScore) {
-                    $bestScore = $score;
-                    $bestDay = $day;
-                    $bestSlot = $slot;
+                
+                // Avoid assigning same faculty multiple times in same day if possible (soft constraint)
+                if (!$facConflict && $attempts < 50) {
+                    $dayAssignments = collect($assignments)->where('day', $day)->where('faculty_id', $facultyId)->count();
+                    if ($dayAssignments >= 2) {
+                        $facConflict = true;
+                    }
                 }
             }
-        }
+            if ($facConflict) continue;
 
-        return [$bestDay, $bestSlot];
-    }
-
-    private function nextSlot(array $timeSlots, string $current): ?string
-    {
-        $index = array_search($current, $timeSlots, true);
-        if ($index === false || $index + 1 >= count($timeSlots)) {
-            return null;
-        }
-
-        return $timeSlots[$index + 1];
-    }
-
-    private function dayLoadScore(array $used, string $day): int
-    {
-        $count = 0;
-        foreach ($used as $key => $value) {
-            if (str_contains($key, '|'.$day.'|')) {
-                $count++;
+            // Constraint 3: Room/Lab Conflict (Room cannot be assigned twice at same time)
+            $roomConflict = false;
+            if ($roomId) {
+                foreach ($slots as $s) {
+                    if (isset($roomOccupied[$roomId][$day][$s])) {
+                        $roomConflict = true; 
+                        break;
+                    }
+                }
             }
+            if ($roomConflict) continue;
+
+            // Avoid repeating same subject multiple times in same day (soft constraint)
+            $subjectDuplicate = false;
+            if ($attempts < 100) {
+                $sameSubjectToday = collect($assignments)->where('day', $day)->where('subject_id', $subject->id)->count();
+                if ($sameSubjectToday >= 1) {
+                    $subjectDuplicate = true;
+                }
+            }
+            if ($subjectDuplicate) continue;
+
+            // If we passed all constraints, assign it
+            $assignments[] = [
+                'department_id' => $deptId,
+                'semester' => $semester,
+                'division' => $division,
+                'academic_year' => $academicYear,
+                'term' => $term,
+                'day' => $day,
+                'time_slot' => $slots[0],
+                'subject_id' => $subject->id,
+                'faculty_id' => $facultyId,
+                'classroom_id' => $roomId,
+                'lecture_type' => $type,
+                'duration' => $duration,
+                'notes' => null,
+            ];
+
+            // Mark globally as occupied
+            if ($facultyId) {
+                foreach ($slots as $s) {
+                    $facultyOccupied[$facultyId][$day][$s] = true;
+                }
+            }
+            if ($roomId) {
+                foreach ($slots as $s) {
+                    $roomOccupied[$roomId][$day][$s] = true;
+                }
+            }
+
+            return true;
         }
-
-        return $count;
-    }
-
-    private function isTheoryRoom(array $room): bool
-    {
-        $type = strtolower((string) ($room['room_type'] ?? ''));
-
-        return $type === 'classroom' || $type === 'theory' || $type === 'lecture';
-    }
-
-    private function isLabRoom(array $room): bool
-    {
-        $type = strtolower((string) ($room['room_type'] ?? ''));
-
-        return $type === 'lab' || $type === 'laboratory';
-    }
-
-    private function isRoomAvailable(array $room): bool
-    {
-        $availability = strtolower((string) ($room['availability'] ?? ''));
-
-        return $availability !== 'booked' && $availability !== 'maintenance';
-    }
-
-    private function makeKey(string $value, string $day, string $timeSlot): string
-    {
-        return $value . '|' . $day . '|' . $timeSlot;
-    }
-
-    private function resolveType(array $subject): string
-    {
-        $subjectType = strtolower((string) ($subject['subject_type'] ?? $subject['type'] ?? ''));
-
-        if ($subjectType === 'lab') {
-            return 'lab';
-        }
-
-        if ($subjectType === 'tutorial') {
-            return 'tutorial';
-        }
-
-        if ((int) ($subject['practical_hours'] ?? 0) > 0) {
-            return 'lab';
-        }
-
-        return 'theory';
+        
+        // If we fail after max attempts, just log or skip, algorithm did its best
+        return false; 
     }
 }

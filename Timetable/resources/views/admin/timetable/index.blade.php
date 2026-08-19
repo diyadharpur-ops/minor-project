@@ -9,7 +9,7 @@
             <p>Select the class details to view the generated timetable.</p>
         </div>
         <div>
-            <a href="/admin/timetable/builder" class="btn">Timetable Builder</a>
+            <a href="/admin/timetable/builder" class="btn" style="background-color: #10b981;">Auto Generate Timetable</a>
         </div>
     </div>
 
@@ -342,7 +342,7 @@
         </div>
     @elseif (request()->isMethod('post'))
         <div class="page-card">
-            <p>No timetable entries found for the selected criteria. <a href="/admin/timetable/builder">Go to Builder to create one.</a></p>
+            <p>No timetable entries found for the selected criteria. <a href="/admin/timetable/builder">Go to Auto Generator to create one.</a></p>
         </div>
     @endif
 @endsection
