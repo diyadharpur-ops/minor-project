@@ -37,7 +37,9 @@
         .search input, .form-row input, .form-row select, .form-row textarea { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; }
         .form-row { display: grid; gap: 8px; margin-bottom: 12px; }
         .form-row label { font-weight: 600; }
-        .alert { padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; background: #fee2e2; color: #991b1b; }
+        .alert { padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; }
+        .alert-success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+        .alert-danger { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
         .row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #e5e7eb; }
         .label { font-weight: 600; }
         @media (max-width: 900px) {
