@@ -97,8 +97,8 @@ class TimetableGenerator
             $faculty = $getFaculty($subject);
             $isPracticalSubject = stripos($subject->subject_type ?? '', 'practical') !== false || stripos($subject->subject_type ?? '', 'lab') !== false;
             
-            $theoryCount = $isPracticalSubject ? 0 : max($subject->credit ?? 3, 2);
-            $practicalCount = $isPracticalSubject ? max($subject->credit ?? 2, 2) : 1; 
+            $theoryCount = $isPracticalSubject ? 0 : ($subject->credit ?? 1);
+            $practicalCount = $isPracticalSubject ? ($subject->credit ?? 1) : 0; 
 
             for ($i = 0; $i < $theoryCount; $i++) {
                 $blocks->push((object)[
@@ -160,8 +160,8 @@ class TimetableGenerator
                     if ($block->duration == 2 && !in_array($ns, [0, 2, 4])) continue;
                     
                     // Rule 1 & 2 Check: Theory & Lab of same subject MUST be on DIFFERENT days
-                    if ($block->type == 'Theory' && !empty($subjectOnDay[$block->subject->id][$day]['Practical'])) continue;
-                    if ($block->type == 'Practical' && !empty($subjectOnDay[$block->subject->id][$day]['Theory'])) continue;
+                    if ($block->type == 'Theory' && !empty($subjectOnDay[$block->subject->name][$day]['Practical'])) continue;
+                    if ($block->type == 'Practical' && !empty($subjectOnDay[$block->subject->name][$day]['Theory'])) continue;
 
                     $slots = [];
                     for ($i = 0; $i < $block->duration; $i++) {
@@ -206,14 +206,14 @@ class TimetableGenerator
                     $penalty += $ns * 10; // Favor emptier days
 
                     // Heavy penalty to avoid repeating same subject multiple times on same day
-                    if (!empty($subjectOnDay[$block->subject->id][$day])) {
+                    if (!empty($subjectOnDay[$block->subject->name][$day])) {
                         $penalty += 500; 
                     }
 
                     // Rule 8: Balance evenly, avoid consecutive days if possible
                     $dayIdx = array_search($day, $this->days);
-                    if ($dayIdx > 0 && !empty($subjectOnDay[$block->subject->id][$this->days[$dayIdx - 1]])) $penalty += 50;
-                    if ($dayIdx < 5 && !empty($subjectOnDay[$block->subject->id][$this->days[$dayIdx + 1]])) $penalty += 50;
+                    if ($dayIdx > 0 && !empty($subjectOnDay[$block->subject->name][$this->days[$dayIdx - 1]])) $penalty += 50;
+                    if ($dayIdx < 5 && !empty($subjectOnDay[$block->subject->name][$this->days[$dayIdx + 1]])) $penalty += 50;
 
                     $validPlacements[] = [
                         'day' => $day,
@@ -256,7 +256,7 @@ class TimetableGenerator
 
                 // Update constraints
                 $nextSlot[$day] += $block->duration;
-                $subjectOnDay[$block->subject->id][$day][$block->type] = true;
+                $subjectOnDay[$block->subject->name][$day][$block->type] = true;
 
                 if ($facultyId) {
                     foreach ($slots as $s) {
