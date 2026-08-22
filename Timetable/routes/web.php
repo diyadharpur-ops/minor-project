@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ForgotPasswordController;
 use App\Http\Controllers\NotificationController;
 use App\Models\Classroom;
 use App\Models\Department;
@@ -1543,3 +1544,7 @@ Route::middleware(['web'])->group(function () {
         return redirect('/')->with('status', 'You have been logged out.');
     });
 });
+
+// Direct Forgot Password Routes
+Route::post('/forgot-password/verify-identifier', [ForgotPasswordController::class, 'verifyIdentifier']);
+Route::post('/forgot-password/direct-reset', [ForgotPasswordController::class, 'resetPasswordDirect']);

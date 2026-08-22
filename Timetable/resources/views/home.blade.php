@@ -536,9 +536,92 @@
                 padding: 2rem;
             }
         }
+        /* Modal CSS */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background: var(--bg-card);
+            border-radius: 20px;
+            width: 100%;
+            max-width: 420px;
+            padding: 2.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            position: relative;
+        }
+        .modal-close {
+            position: absolute;
+            top: 1.5rem;
+            right: 1.5rem;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+        .modal-close:hover { color: var(--text-main); }
+        .modal-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; }
+        .modal-desc { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+        .strength-meter-bg { height: 6px; background: #e2e8f0; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+        .strength-meter-fill { height: 100%; width: 0%; transition: all 0.3s; }
     </style>
 </head>
 <body>
+    <!-- Forgot Password Modal (Direct) -->
+    <div class="modal-overlay" id="fp-modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeForgotPasswordModal()">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+            <h2 class="modal-title">Reset Password</h2>
+            
+            <div id="fp-error" class="alert alert-error" style="display:none; padding: 0.75rem;"></div>
+            <div id="fp-success" class="alert alert-success" style="display:none; padding: 0.75rem;"></div>
+
+            <!-- Step 1: Identifier -->
+            <div id="fp-step-1">
+                <p class="modal-desc">Enter your registered Email Address or Enrollment Number to reset your password.</p>
+                <div class="input-group">
+                    <label class="input-label" id="fp-identifier-label">Email Address OR Enrollment Number</label>
+                    <input type="text" id="fp-identifier" class="input-field" placeholder="Enter your registered Email Address or Enrollment Number">
+                </div>
+                <button type="button" id="btn-verify-identifier" class="btn-primary" onclick="verifyIdentifier()">Continue</button>
+            </div>
+
+            <!-- Step 2: Reset Password -->
+            <div id="fp-step-2" style="display:none;">
+                <p class="modal-desc">Create a strong new password for your account.</p>
+                <div class="input-group">
+                    <label class="input-label">New Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="fp-new-password" class="input-field" placeholder="New Password" onkeyup="checkPasswordStrength()">
+                        <button type="button" class="password-toggle" onclick="togglePassword('fp-new-password')">
+                            <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            <svg class="eye-off-icon" style="display:none;" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                        </button>
+                    </div>
+                    <div class="strength-meter-bg"><div class="strength-meter-fill" id="pass-strength"></div></div>
+                </div>
+                <div class="input-group">
+                    <label class="input-label">Confirm Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="fp-confirm-password" class="input-field" placeholder="Confirm Password">
+                        <button type="button" class="password-toggle" onclick="togglePassword('fp-confirm-password')">
+                            <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            <svg class="eye-off-icon" style="display:none;" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                        </button>
+                    </div>
+                </div>
+                <button type="button" id="btn-reset-pass" class="btn-primary" onclick="resetPasswordDirect()">Update Password</button>
+            </div>
+        </div>
+    </div>
     <div class="layout-container">
         <!-- Left Panel -->
         <div class="left-panel">
@@ -639,7 +722,7 @@
                             <label class="remember-me">
                                 <input type="checkbox" name="remember"> Remember me
                             </label>
-                            <a href="#" class="forgot-password">Forgot Password?</a>
+                            <a href="#" class="forgot-password" onclick="openForgotPasswordModal('admin')">Forgot Password?</a>
                         </div>
                         <button type="submit" class="btn-primary">Login to Account</button>
                     </form>
@@ -667,7 +750,7 @@
                             <label class="remember-me">
                                 <input type="checkbox" name="remember"> Remember me
                             </label>
-                            <a href="#" class="forgot-password">Forgot Password?</a>
+                            <a href="#" class="forgot-password" onclick="openForgotPasswordModal('faculty')">Forgot Password?</a>
                         </div>
                         <button type="submit" class="btn-primary">Login to Account</button>
                     </form>
@@ -695,7 +778,7 @@
                             <label class="remember-me">
                                 <input type="checkbox" name="remember"> Remember me
                             </label>
-                            <a href="#" class="forgot-password">Forgot Password?</a>
+                            <a href="#" class="forgot-password" onclick="openForgotPasswordModal('student')">Forgot Password?</a>
                         </div>
                         <button type="submit" class="btn-primary">Login to Account</button>
                     </form>
@@ -872,6 +955,176 @@
         @if(old('enrollment_number') && !old('email') && !old('name'))
             document.querySelector('[data-target="student-login"]').click();
         @endif
+
+        // Forgot Password Logic
+        let fpRole = '';
+        let fpIdentifier = '';
+
+        function openForgotPasswordModal(role) {
+            fpRole = role;
+            document.getElementById('fp-modal').style.display = 'flex';
+            document.getElementById('fp-step-1').style.display = 'block';
+            document.getElementById('fp-step-2').style.display = 'none';
+            
+            document.getElementById('fp-identifier').value = '';
+            document.getElementById('fp-new-password').value = '';
+            document.getElementById('fp-confirm-password').value = '';
+            document.getElementById('fp-error').style.display = 'none';
+            document.getElementById('fp-success').style.display = 'none';
+        }
+
+        function closeForgotPasswordModal() {
+            document.getElementById('fp-modal').style.display = 'none';
+        }
+
+        function showFpError(msg) {
+            const err = document.getElementById('fp-error');
+            err.innerText = msg;
+            err.style.display = 'block';
+            document.getElementById('fp-success').style.display = 'none';
+        }
+
+        function showFpSuccess(msg) {
+            const suc = document.getElementById('fp-success');
+            suc.innerText = msg;
+            suc.style.display = 'block';
+            document.getElementById('fp-error').style.display = 'none';
+        }
+
+        function setFpLoading(btnId, isLoading) {
+            const btn = document.getElementById(btnId);
+            if(isLoading) {
+                btn.classList.add('loading');
+                btn.disabled = true;
+            } else {
+                btn.classList.remove('loading');
+                btn.disabled = false;
+            }
+        }
+
+        function verifyIdentifier() {
+            fpIdentifier = document.getElementById('fp-identifier').value;
+            if(!fpIdentifier) return showFpError('Please enter your Email or Enrollment Number.');
+            
+            setFpLoading('btn-verify-identifier', true);
+            
+            fetch('/forgot-password/verify-identifier', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ role: fpRole, identifier: fpIdentifier })
+            })
+            .then(res => {
+                const contentType = res.headers.get('content-type') || '';
+                if (!contentType.includes('application/json')) {
+                    return res.text().then(text => {
+                        throw new Error('Server Error (HTTP ' + res.status + '): ' + text.substring(0, 200));
+                    });
+                }
+                return res.json();
+            })
+            .then(data => {
+                setFpLoading('btn-verify-identifier', false);
+                if(data.error) {
+                    showFpError(data.error);
+                } else if(data.errors) {
+                    showFpError(Object.values(data.errors)[0][0]);
+                } else {
+                    document.getElementById('fp-step-1').style.display = 'none';
+                    document.getElementById('fp-step-2').style.display = 'block';
+                    document.getElementById('fp-error').style.display = 'none';
+                }
+            })
+            .catch(err => {
+                setFpLoading('btn-verify-identifier', false);
+                showFpError(err.message || 'Network Error. Please try again.');
+            });
+        }
+
+        function resetPasswordDirect() {
+            const pass = document.getElementById('fp-new-password').value;
+            const confirm = document.getElementById('fp-confirm-password').value;
+            
+            if(!pass || !confirm) return showFpError('Please enter both password fields.');
+
+            // Client-side validation
+            if(pass.length < 8 || pass.length > 64)
+                return showFpError('Password does not meet security requirements. (min 8, max 64 characters)');
+            if(!/[a-z]/.test(pass))
+                return showFpError('Password must contain at least one lowercase letter.');
+            if(!/[A-Z]/.test(pass))
+                return showFpError('Password must contain at least one uppercase letter.');
+            if(!/[0-9]/.test(pass))
+                return showFpError('Password must contain at least one number.');
+            if(!/[@$!%*#?&]/.test(pass))
+                return showFpError('Password must contain at least one special character (@$!%*#?&).');
+            if(pass !== confirm)
+                return showFpError('Confirm Password does not match.');
+            
+            setFpLoading('btn-reset-pass', true);
+            
+            fetch('/forgot-password/direct-reset', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    role: fpRole, 
+                    identifier: fpIdentifier, 
+                    password: pass,
+                    password_confirmation: confirm
+                })
+            })
+            .then(res => {
+                const contentType = res.headers.get('content-type') || '';
+                if (!contentType.includes('application/json')) {
+                    return res.text().then(text => {
+                        throw new Error('Server Error (HTTP ' + res.status + '): ' + text.substring(0, 300));
+                    });
+                }
+                return res.json();
+            })
+            .then(data => {
+                setFpLoading('btn-reset-pass', false);
+                if(data.errors) {
+                    showFpError(Object.values(data.errors)[0][0]);
+                } else if(data.error) {
+                    showFpError(data.error);
+                } else {
+                    showFpSuccess(data.success);
+                    setTimeout(() => {
+                        closeForgotPasswordModal();
+                        document.querySelector(`[data-target="${fpRole}-login"]`).click();
+                    }, 2000);
+                }
+            })
+            .catch(err => {
+                setFpLoading('btn-reset-pass', false);
+                showFpError(err.message || 'Network Error. Please try again.');
+            });
+        }
+
+        function checkPasswordStrength() {
+            const pass = document.getElementById('fp-new-password').value;
+            const meter = document.getElementById('pass-strength');
+            let strength = 0;
+            if(pass.length >= 8) strength++;
+            if(pass.match(/[a-z]+/)) strength++;
+            if(pass.match(/[A-Z]+/)) strength++;
+            if(pass.match(/[0-9]+/)) strength++;
+            if(pass.match(/[@$!%*#?&]+/)) strength++;
+            
+            const colors = ['#ef4444', '#ef4444', '#f59e0b', '#f59e0b', '#10b981', '#10b981'];
+            const widths = ['0%', '20%', '40%', '60%', '80%', '100%'];
+            
+            meter.style.width = widths[strength];
+            meter.style.backgroundColor = colors[strength];
+        }
     </script>
 </body>
 </html>
