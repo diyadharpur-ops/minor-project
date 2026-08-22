@@ -10,7 +10,9 @@ use App\Models\RoomAllocation;
 use App\Models\Subject;
 use App\Models\TimetableEntry;
 use App\Models\User;
+use App\Services\TimetableGenerator;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -349,19 +351,19 @@ Route::post('/admin/timetable/builder', function (Request $request) {
     ]);
 
     try {
-        $generator = new \App\Services\TimetableGenerator();
+        $generator = new TimetableGenerator;
         $success = $generator->generate(
-            $data['department_id'], 
-            $data['semester'], 
-            $data['division'], 
-            $data['academic_year'], 
+            $data['department_id'],
+            $data['semester'],
+            $data['division'],
+            $data['academic_year'],
             $data['term']
         );
 
-        if (!$success) {
+        if (! $success) {
             return back()->with('error', 'Could not generate timetable. Please ensure subjects exist for this class.')->withInput();
         }
-    } catch (\Exception $e) {
+    } catch (Exception $e) {
         return back()->with('error', $e->getMessage())->withInput();
     }
 
@@ -996,37 +998,61 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     if ($request->isMethod('post')) {
         if ($request->input('form_type') === 'auto-allocate' || $request->input('form_type') === 're-generate') {
 
-            // Re-generate or clear existing for a clean state
-            RoomAllocation::query()->delete();
-
-            // 1. Check if Subjects exist
-            $subjectCountCheck = Subject::count();
-            if ($subjectCountCheck === 0) {
+            $subjects = Subject::with('department')->get();
+            if ($subjects->isEmpty()) {
                 return back()->withErrors(['auto' => 'No subjects found for the selected academic year/semester.']);
             }
 
-            // 2. Check if Classrooms and Labs exist
             $classrooms = Classroom::where('availability', 'Available')
-                ->orderBy('room_capacity', 'asc')
+                ->orderBy('room_number')
                 ->get();
 
             if ($classrooms->isEmpty()) {
-                $totalRooms = Classroom::count();
-                if ($totalRooms === 0) {
+                if (Classroom::count() === 0) {
                     return back()->withErrors(['auto' => 'No classrooms available. Please add classrooms first.']);
-                } else {
-                    return back()->withErrors(['auto' => 'No available classrooms/labs found.']);
                 }
+
+                return back()->withErrors(['auto' => 'No available classrooms/labs found.']);
             }
 
-            // 3. Find base classes from Subjects
-            $baseClasses = Subject::select('department_id', 'semester')
-                ->groupBy('department_id', 'semester')
-                ->get();
+            $normalizeRoomType = function ($roomType) {
+                $value = strtolower(trim((string) ($roomType ?? '')));
+
+                return str_contains($value, 'lab') || str_contains($value, 'practical')
+                    ? 'Lab'
+                    : 'Classroom';
+            };
+
+            $normalizeSubjectType = function ($subjectType) {
+                $value = strtolower(trim((string) ($subjectType ?? 'Classroom')));
+
+                return str_contains($value, 'lab') || str_contains($value, 'practical')
+                    ? 'Lab'
+                    : 'Classroom';
+            };
+
+            $availableLabs = $classrooms->filter(fn ($room) => $normalizeRoomType($room->room_type) === 'Lab')
+                ->filter(fn ($room) => (int) $room->room_capacity > 0)
+                ->filter(fn ($room) => filled($room->room_number))
+                ->values();
+            $availableLabNumbers = $availableLabs->pluck('room_number')->unique()->values();
+            $classroomF111 = $classrooms->first(fn ($room) => $room->room_number === 'F111');
+
+            if ($availableLabNumbers->count() < 2) {
+                return back()->withErrors(['auto' => 'Two suitable available lab rooms are required for every Lab subject.']);
+            }
+
+            if (! $classroomF111) {
+                return back()->withErrors(['auto' => 'Available classroom F111 is required for every Classroom subject.']);
+            }
+
+            $baseClasses = $subjects
+                ->groupBy(fn ($subject) => $subject->department_id.'|'.$subject->semester)
+                ->map(fn ($group) => $group->first())
+                ->values();
 
             $allocationGroups = [];
 
-            // 4. Derive divisions from Student records if they exist
             foreach ($baseClasses as $base) {
                 $dept = Department::find($base->department_id);
                 if (! $dept) {
@@ -1044,7 +1070,6 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
                     ->pluck('divcon');
 
                 if ($divisions->isEmpty()) {
-                    // No explicit division found in students, use just Dept + Semester
                     $allocationGroups[] = [
                         'department_id' => $dept->id,
                         'department_name' => $dept->name,
@@ -1053,7 +1078,6 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
                         'class_name' => $dept->name.'-'.$base->semester,
                     ];
                 } else {
-                    // Split into multiple class groups based on divisions
                     foreach ($divisions as $div) {
                         $allocationGroups[] = [
                             'department_id' => $dept->id,
@@ -1068,169 +1092,58 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
 
             $countAllocatedClassrooms = 0;
             $countAllocatedLabs = 0;
-            $countUnallocated = 0;
+            DB::transaction(function () use ($allocationGroups, $normalizeSubjectType, $availableLabs, $classroomF111, &$countAllocatedClassrooms, &$countAllocatedLabs) {
+                RoomAllocation::query()->delete();
 
-            // To avoid assigning the same room to multiple subjects if possible
-            // though without time, there's no real "conflict". We just assign one to each.
-            $normalizeRoomType = function ($roomType) {
-                $value = strtolower(trim((string) ($roomType ?? '')));
+                foreach ($allocationGroups as $group) {
+                    $query = User::whereNotNull('enrollment_number')
+                        ->where('department', $group['department_name'])
+                        ->where('semester', $group['semester']);
 
-                if (str_contains($value, 'lab') || str_contains($value, 'practical')) {
-                    return 'Lab';
-                }
-
-                return 'Classroom';
-            };
-
-            $normalizeSubjectType = function ($subjectType) {
-                $value = strtolower(trim((string) ($subjectType ?? 'Classroom')));
-
-                if (str_contains($value, 'lab') || str_contains($value, 'practical')) {
-                    return 'Lab';
-                }
-
-                return 'Classroom';
-            };
-
-            foreach ($allocationGroups as $group) {
-                // Calculate Student Strength
-                $query = User::whereNotNull('enrollment_number')
-                    ->where('department', $group['department_name'])
-                    ->where('semester', $group['semester']);
-
-                if ($group['division']) {
-                    $query->where('divcon', $group['division']);
-                }
-
-                $studentStrength = $query->count();
-                $capacityToUse = max(1, (int) ($studentStrength > 0 ? $studentStrength : 60));
-                $usedRoomIds = [];
-
-                // Find Subjects
-                $subjects = Subject::where('department_id', $group['department_id'])
-                    ->where('semester', $group['semester'])
-                    ->get();
-
-                foreach ($subjects as $subject) {
-                    $requiredRoomType = $normalizeSubjectType($subject->subject_type ?? 'Classroom');
-                    $isLab = $requiredRoomType === 'Lab';
-                    $selectedRoomIds = [];
-                    $selectedRoomNumbers = [];
-                    $remainingRequiredCapacity = $capacityToUse;
-
-                    if ($isLab) {
-                        $labRooms = $classrooms
-                            ->filter(function ($room) use ($usedRoomIds, $normalizeRoomType, $requiredRoomType) {
-                                if ($room->availability !== 'Available') {
-                                    return false;
-                                }
-
-                                if ((int) $room->room_capacity <= 0) {
-                                    return false;
-                                }
-
-                                if ($normalizeRoomType($room->room_type) !== $requiredRoomType) {
-                                    return false;
-                                }
-
-                                return ! isset($usedRoomIds[$room->id]);
-                            })
-                            ->sortBy(function ($room) {
-                                return (int) $room->room_capacity;
-                            })
-                            ->values();
-
-                        foreach ($labRooms as $room) {
-                            if ($remainingRequiredCapacity <= 0) {
-                                break;
-                            }
-
-                            $selectedRoomIds[] = $room->id;
-                            $selectedRoomNumbers[] = $room->room_number;
-                            $remainingRequiredCapacity -= (int) $room->room_capacity;
-                        }
-
-                        if ($remainingRequiredCapacity > 0) {
-                            $selectedRoomIds = [];
-                            $selectedRoomNumbers = [];
-                        }
-                    } else {
-                        $classroomRoom = $classrooms
-                            ->filter(function ($room) use ($usedRoomIds, $normalizeRoomType, $requiredRoomType, $capacityToUse) {
-                                if ($room->availability !== 'Available') {
-                                    return false;
-                                }
-
-                                if ((int) $room->room_capacity < $capacityToUse) {
-                                    return false;
-                                }
-
-                                if ($normalizeRoomType($room->room_type) !== $requiredRoomType) {
-                                    return false;
-                                }
-
-                                return ! isset($usedRoomIds[$room->id]);
-                            })
-                            ->sortByDesc(function ($room) {
-                                return (int) $room->room_capacity;
-                            })
-                            ->first();
-
-                        if ($classroomRoom) {
-                            $selectedRoomIds = [$classroomRoom->id];
-                            $selectedRoomNumbers = [$classroomRoom->room_number];
-                        }
+                    if ($group['division']) {
+                        $query->where('divcon', $group['division']);
                     }
 
-                    if (! empty($selectedRoomIds) && ! empty($selectedRoomNumbers)) {
-                        foreach ($selectedRoomIds as $roomId) {
-                            $usedRoomIds[$roomId] = true;
+                    $studentStrength = $query->count();
+                    $capacityToUse = max(1, (int) ($studentStrength > 0 ? $studentStrength : 60));
+                    $groupSubjects = Subject::where('department_id', $group['department_id'])
+                        ->where('semester', $group['semester'])
+                        ->get();
+
+                    foreach ($groupSubjects as $subject) {
+                        $isLab = $normalizeSubjectType($subject->subject_type) === 'Lab';
+                        $selectedRooms = $isLab ? $availableLabs->take(2) : collect([$classroomF111]);
+                        $roomNumbers = $selectedRooms->pluck('room_number')->filter()->values();
+
+                        if ($isLab && ($selectedRooms->count() !== 2 || $roomNumbers->unique()->count() !== 2)) {
+                            throw new RuntimeException('Two suitable different lab rooms are unavailable for '.$subject->name.'.');
                         }
 
-                        $formattedRooms = implode(' + ', $selectedRoomNumbers);
+                        if ($roomNumbers->count() !== $selectedRooms->count() || $roomNumbers->contains('')) {
+                            throw new RuntimeException('A valid room is unavailable for '.$subject->name.'.');
+                        }
 
                         RoomAllocation::create([
                             'department_id' => $group['department_id'],
                             'semester' => $group['semester'],
                             'subject_id' => $subject->id,
                             'faculty_id' => null,
-                            'classroom_id' => $selectedRoomIds[0] ?? null,
+                            'classroom_id' => $selectedRooms->first()->id,
                             'class_name' => $group['class_name'],
                             'student_count' => $capacityToUse,
                             'day' => '-',
                             'start_time' => null,
                             'end_time' => null,
                             'status' => 'Allocated',
-                            'notes' => $formattedRooms,
+                            'notes' => $roomNumbers->implode(' + '),
                         ]);
 
-                        if ($isLab) {
-                            $countAllocatedLabs++;
-                        } else {
-                            $countAllocatedClassrooms++;
-                        }
-                    } else {
-                        RoomAllocation::create([
-                            'department_id' => $group['department_id'],
-                            'semester' => $group['semester'],
-                            'subject_id' => $subject->id,
-                            'faculty_id' => null,
-                            'classroom_id' => null,
-                            'class_name' => $group['class_name'],
-                            'student_count' => $capacityToUse,
-                            'day' => '-',
-                            'start_time' => null,
-                            'end_time' => null,
-                            'status' => 'Unallocated',
-                            'notes' => '-',
-                        ]);
-                        $countUnallocated++;
+                        $isLab ? $countAllocatedLabs++ : $countAllocatedClassrooms++;
                     }
                 }
-            }
+            });
 
-            $actionName = $request->input('form_type') === 're-generate' ? 'Re-Generation' : 'Auto Allocation';
-            $allocationStatus = "{$actionName} complete: {$countAllocatedClassrooms} Classroom(s) allocated, {$countAllocatedLabs} Lab(s) allocated, {$countUnallocated} unallocated.";
+            $allocationStatus = 'Allocation Generated Successfully!';
 
             // Trigger notifications for Classroom/Lab Allocation and Subject Unassigned
             if ($countAllocatedClassrooms > 0) {
@@ -1239,11 +1152,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
             if ($countAllocatedLabs > 0) {
                 Notification::trigger('Lab Allocation Completed', ['count' => $countAllocatedLabs]);
             }
-            if ($countUnallocated > 0) {
-                Notification::trigger('Subject Not Assigned', ['subject_name' => "Multiple ({$countUnallocated} subjects)"]);
-            }
 
-            // 17. Display Allocation Results
             return redirect('/admin/classroom-allocation')->with('allocation_status', $allocationStatus);
         }
     }
