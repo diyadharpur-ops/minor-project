@@ -765,6 +765,7 @@ Route::get('/admin/subjects', function (Request $request) {
             ->orWhere('semester', 'like', "%{$q}%")
             ->orWhere('faculty_name', 'like', "%{$q}%");
         $searchResults = $query->orderBy('created_at', 'desc')->get();
+
         return view('admin.subjects.index', ['searchResults' => $searchResults, 'groupedSubjects' => collect()]);
     }
 
@@ -787,22 +788,22 @@ Route::get('/admin/subjects/create', function () {
     }
 
     // Fix: Remove semesters 7 and 8
-    \App\Models\Division::whereIn('semester', ['7', '8'])->delete();
+    Division::whereIn('semester', ['7', '8'])->delete();
 
     // Auto-seed some default divisions if empty
-    if (\App\Models\Division::count() === 0) {
+    if (Division::count() === 0) {
         $semesters = ['1', '2', '3', '4', '5', '6'];
         $divisions = ['A', 'B', 'C'];
         foreach ($semesters as $sem) {
             foreach ($divisions as $div) {
-                \App\Models\Division::create(['name' => $div, 'semester' => $sem]);
+                Division::create(['name' => $div, 'semester' => $sem]);
             }
         }
     }
 
     // Get all unique semesters from divisions
     $semesters = Division::select('semester')->distinct()->orderBy('semester')->get()->pluck('semester');
-    
+
     // Group divisions by semester
     $divisionsBySemester = Division::all()->groupBy('semester')->mapWithKeys(function ($divisions, $semester) {
         return [$semester => $divisions->values()];
@@ -875,19 +876,19 @@ Route::get('/admin/subjects/{id}/edit', function ($id) {
     $subject = Subject::with('department', 'division', 'faculty')->findOrFail($id);
 
     // Auto-seed some default divisions if empty
-    if (\App\Models\Division::count() === 0) {
+    if (Division::count() === 0) {
         $semesters = ['1', '2', '3', '4', '5', '6'];
         $divisions = ['A', 'B', 'C'];
         foreach ($semesters as $sem) {
             foreach ($divisions as $div) {
-                \App\Models\Division::create(['name' => $div, 'semester' => $sem]);
+                Division::create(['name' => $div, 'semester' => $sem]);
             }
         }
     }
 
     // Get all unique semesters from divisions
     $semesters = Division::select('semester')->distinct()->orderBy('semester')->get()->pluck('semester');
-    
+
     // Group divisions by semester
     $divisionsBySemester = Division::all()->groupBy('semester')->mapWithKeys(function ($divisions, $semester) {
         return [$semester => $divisions->values()];
@@ -1068,9 +1069,23 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
         return redirect('/admin/login');
     }
 
-    $allocations = RoomAllocation::with(['department', 'subject', 'classroom'])
-        ->orderBy('id', 'desc')
-        ->paginate(10);
+    $departments = Department::orderBy('name')->get();
+
+    // Build allocations query — filter by dept/semester/division when query params are present
+    $allocQuery = RoomAllocation::with(['department', 'subject', 'classroom'])
+        ->orderBy('id', 'desc');
+
+    if ($request->filled('department_id')) {
+        $allocQuery->where('department_id', $request->input('department_id'));
+    }
+    if ($request->filled('semester')) {
+        $allocQuery->where('semester', $request->input('semester'));
+    }
+    if ($request->filled('division')) {
+        $allocQuery->where('class_name', 'like', '%'.$request->input('division').'%');
+    }
+
+    $allocations = $allocQuery->paginate(10)->withQueryString();
 
     $totalSubjects = RoomAllocation::count();
     $allocatedClassroomCount = RoomAllocation::where('status', 'Allocated')
@@ -1088,6 +1103,159 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     $allocationStatus = null;
 
     if ($request->isMethod('post')) {
+
+        // ── Filtered Auto-Allocate: only for selected dept/semester/division ──
+        if ($request->input('form_type') === 'filtered-auto-allocate') {
+            $data = $request->validate([
+                'department_id' => 'required|integer|exists:departments,id',
+                'semester' => 'required|string|max:10',
+                'division' => 'required|string|max:10',
+                'term' => 'required|string|max:20',
+                'academic_year' => 'required|string|max:20',
+            ]);
+
+            $deptId = $data['department_id'];
+            $semester = $data['semester'];
+            $division = $data['division'];
+            $term = $data['term'];
+            $academicYear = $data['academic_year'];
+
+            $dept = Department::findOrFail($deptId);
+
+            $subjects = Subject::where('department_id', $deptId)
+                ->where('semester', $semester)
+                ->get();
+
+            if ($subjects->isEmpty()) {
+                return back()->withErrors(['auto' => "No subjects found for {$dept->name} — Semester {$semester}."])->withInput();
+            }
+
+            $classrooms = Classroom::where('availability', 'Available')
+                ->orderBy('room_number')
+                ->get();
+
+            if ($classrooms->isEmpty()) {
+                if (Classroom::count() === 0) {
+                    return back()->withErrors(['auto' => 'No classrooms available. Please add classrooms first.'])->withInput();
+                }
+
+                return back()->withErrors(['auto' => 'No available classrooms/labs found.'])->withInput();
+            }
+
+            $normalizeRoomType = function ($roomType) {
+                $value = strtolower(trim((string) ($roomType ?? '')));
+
+                return str_contains($value, 'lab') || str_contains($value, 'practical')
+                    ? 'Lab'
+                    : 'Classroom';
+            };
+
+            $normalizeSubjectType = function ($subjectType) {
+                $value = strtolower(trim((string) ($subjectType ?? 'Classroom')));
+
+                return str_contains($value, 'lab') || str_contains($value, 'practical')
+                    ? 'Lab'
+                    : 'Classroom';
+            };
+
+            $availableLabs = $classrooms->filter(fn ($room) => $normalizeRoomType($room->room_type) === 'Lab')
+                ->filter(fn ($room) => (int) $room->room_capacity > 0)
+                ->filter(fn ($room) => filled($room->room_number))
+                ->values();
+
+            $classroomRooms = $classrooms->filter(fn ($room) => $normalizeRoomType($room->room_type) === 'Classroom')
+                ->filter(fn ($room) => filled($room->room_number))
+                ->values();
+
+            // Fallback: if no specific classroom type, use first available room
+            $defaultClassroom = $classroomRooms->first() ?? $classrooms->first();
+
+            if ($availableLabs->count() < 2 && $subjects->contains(fn ($s) => $normalizeSubjectType($s->subject_type) === 'Lab')) {
+                return back()->withErrors(['auto' => 'At least two available lab rooms are required for Lab subjects.'])->withInput();
+            }
+
+            if (! $defaultClassroom && $subjects->contains(fn ($s) => $normalizeSubjectType($s->subject_type) === 'Classroom')) {
+                return back()->withErrors(['auto' => 'No available classroom room found for Classroom subjects.'])->withInput();
+            }
+
+            // Get student count for this division
+            $studentStrength = User::whereNotNull('enrollment_number')
+                ->where('department', $dept->name)
+                ->where('semester', $semester)
+                ->where('divcon', $division)
+                ->count();
+            $capacityToUse = max(1, $studentStrength > 0 ? $studentStrength : 60);
+
+            $className = $dept->name.'-'.$semester.'-'.$division;
+            $countAllocatedClassrooms = 0;
+            $countAllocatedLabs = 0;
+
+            DB::transaction(function () use (
+                $subjects, $normalizeSubjectType, $availableLabs, $defaultClassroom,
+                $deptId, $semester, $division, $className, $capacityToUse,
+                &$countAllocatedClassrooms, &$countAllocatedLabs
+            ) {
+                // Delete only this dept+semester+division's existing allocations
+                RoomAllocation::where('department_id', $deptId)
+                    ->where('semester', $semester)
+                    ->where('class_name', 'like', "%{$division}%")
+                    ->delete();
+
+                foreach ($subjects as $subject) {
+                    $isLab = $normalizeSubjectType($subject->subject_type) === 'Lab';
+
+                    if ($isLab) {
+                        $selectedRooms = $availableLabs->take(2);
+                        $roomNumbers = $selectedRooms->pluck('room_number')->filter()->values();
+                        $firstRoom = $selectedRooms->first();
+
+                        if ($selectedRooms->count() < 2 || $roomNumbers->unique()->count() < 2) {
+                            throw new RuntimeException('Two suitable different lab rooms are unavailable for '.$subject->name.'.');
+                        }
+
+                        $notes = $roomNumbers->implode(' + ');
+                    } else {
+                        $firstRoom = $defaultClassroom;
+                        $roomNumbers = collect([$firstRoom->room_number]);
+                        $notes = $firstRoom->room_number;
+                    }
+
+                    RoomAllocation::create([
+                        'department_id' => $deptId,
+                        'semester' => $semester,
+                        'subject_id' => $subject->id,
+                        'faculty_id' => $subject->faculty_id ?? null,
+                        'classroom_id' => $firstRoom->id,
+                        'class_name' => $className,
+                        'student_count' => $capacityToUse,
+                        'day' => '-',
+                        'start_time' => null,
+                        'end_time' => null,
+                        'status' => 'Allocated',
+                        'notes' => $notes,
+                    ]);
+
+                    $isLab ? $countAllocatedLabs++ : $countAllocatedClassrooms++;
+                }
+            });
+
+            if ($countAllocatedClassrooms > 0) {
+                Notification::trigger('Classroom Allocation Completed', ['count' => $countAllocatedClassrooms]);
+            }
+            if ($countAllocatedLabs > 0) {
+                Notification::trigger('Lab Allocation Completed', ['count' => $countAllocatedLabs]);
+            }
+
+            $qs = http_build_query([
+                'department_id' => $deptId,
+                'semester' => $semester,
+                'division' => $division,
+            ]);
+
+            return redirect('/admin/classroom-allocation?'.$qs)
+                ->with('allocation_status', "Allocation generated for {$className} ({$countAllocatedClassrooms} Classrooms + {$countAllocatedLabs} Labs).");
+        }
+
         if ($request->input('form_type') === 'auto-allocate' || $request->input('form_type') === 're-generate') {
 
             $subjects = Subject::with('department')->get();
@@ -1250,8 +1418,9 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     }
 
     return view('admin.classrooms.allocation', [
+        'departments' => $departments,
         'allocations' => $allocations,
-        'totalLectures' => $totalSubjects, // Passing as totalLectures so we don't break UI vars unnecessarily
+        'totalLectures' => $totalSubjects,
         'allocatedCount' => $allocatedClassroomCount,
         'allocatedLabCount' => $allocatedLabCount,
         'unallocatedCount' => $unallocatedCount,

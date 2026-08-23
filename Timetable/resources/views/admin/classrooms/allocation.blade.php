@@ -3,6 +3,14 @@
 @section('title', 'Classroom & Lab Allocation')
 
 @section('content')
+
+@php
+    // Ensure $departments is always available as a fallback
+    if (! isset($departments)) {
+        $departments = \App\Models\Department::orderBy('name')->get();
+    }
+@endphp
+
 <style>
     .summary-grid {
         display: grid;
@@ -107,12 +115,99 @@
         margin-top: 24px;
         font-size: 0.9rem;
     }
+
+    /* Filter Form */
+    .filter-card {
+        background: white;
+        padding: 20px 24px;
+        border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+        margin-bottom: 24px;
+    }
+    .filter-card h2 {
+        margin: 0 0 16px 0;
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: #111827;
+    }
+    .filter-row {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+    }
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1;
+        min-width: 130px;
+    }
+    .filter-group label {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #374151;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .filter-group select,
+    .filter-group input[type="text"] {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 0.9rem;
+        color: #111827;
+        background: #f9fafb;
+        transition: border-color 0.2s;
+        outline: none;
+    }
+    .filter-group select:focus,
+    .filter-group input[type="text"]:focus {
+        border-color: #2563eb;
+        background: #fff;
+    }
+    .btn-generate {
+        padding: 9px 20px;
+        background: #10b981;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.92rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.2s;
+    }
+    .btn-generate:hover { background: #059669; }
+    .btn-generate:disabled { background: #6ee7b7; cursor: not-allowed; }
+
+    .filter-active-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        color: #1d4ed8;
+        border-radius: 20px;
+        padding: 4px 12px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        margin-left: 10px;
+    }
+    .filter-active-badge a {
+        color: #6b7280;
+        text-decoration: none;
+        font-size: 1rem;
+        line-height: 1;
+    }
+    .filter-active-badge a:hover { color: #ef4444; }
 </style>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
     <div>
-        <h1>Classroom & Lab Allocation</h1>
-        <p style="color: #6b7280; font-size: 0.9rem; margin-top: 4px;">Auto allocate classrooms and labs based on subject type.</p>
+        <h1>Classroom &amp; Lab Allocation</h1>
+        <p style="color: #6b7280; font-size: 0.9rem; margin-top: 4px;">Select criteria and auto-allocate classrooms &amp; labs based on subject type.</p>
     </div>
     <div style="text-align: right;">
         <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;">Academic Year : {{ \App\Models\TimetableEntry::max('academic_year') ?? '2024-25' }}</div>
@@ -132,6 +227,64 @@
         </ul>
     </div>
 @endif
+
+{{-- ===== Filter / Auto Generate Form ===== --}}
+<div class="filter-card">
+    <h2>⚙️ Generate Allocation for a Specific Class</h2>
+    <form method="POST" action="/admin/classroom-allocation" id="filteredGenForm">
+        @csrf
+        <input type="hidden" name="form_type" value="filtered-auto-allocate">
+        <div class="filter-row">
+            <div class="filter-group">
+                <label>Department</label>
+                <select name="department_id" required>
+                    <option value="">Select Department</option>
+                    @foreach ($departments as $dept)
+                        <option value="{{ $dept->id }}"
+                            {{ old('department_id', request('department_id')) == $dept->id ? 'selected' : '' }}>
+                            {{ $dept->name }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Semester</label>
+                <select name="semester" required>
+                    <option value="">Select Semester</option>
+                    @foreach (['1','2','3','4','5','6'] as $sem)
+                        <option value="{{ $sem }}"
+                            {{ old('semester', request('semester')) == $sem ? 'selected' : '' }}>
+                            Semester {{ $sem }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Division</label>
+                <input type="text" name="division" placeholder="e.g. A"
+                    value="{{ old('division', request('division', 'A')) }}" required>
+            </div>
+            <div class="filter-group">
+                <label>Term</label>
+                <select name="term" required>
+                    <option value="Odd" {{ old('term', request('term', 'Odd')) == 'Odd' ? 'selected' : '' }}>Odd</option>
+                    <option value="Even" {{ old('term', request('term')) == 'Even' ? 'selected' : '' }}>Even</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Academic Year</label>
+                <input type="text" name="academic_year" placeholder="e.g. 2026-2027"
+                    value="{{ old('academic_year', request('academic_year', date('Y').'-'.(date('Y')+1))) }}" required>
+            </div>
+            <div>
+                <button type="submit" class="btn-generate" id="filteredGenBtn"
+                    onclick="this.innerHTML='Generating...'; this.disabled=true; document.getElementById('filteredGenForm').submit();">
+                    ⚙️ Auto Generate
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
 
 <div class="summary-grid">
     <div class="summary-card">
@@ -154,20 +307,28 @@
 
 <div class="page-card">
     <div class="allocation-header">
-        <h2 style="margin: 0;">Allocation Results</h2>
+        <h2 style="margin: 0;">
+            Allocation Results
+            @if(request('department_id') || request('semester'))
+                <span class="filter-active-badge">
+                    🔍 Filtered
+                    <a href="/admin/classroom-allocation" title="Clear filter">✕</a>
+                </span>
+            @endif
+        </h2>
         <div class="page-actions">
             <form method="POST" action="/admin/classroom-allocation" style="display:inline;" id="autoGenForm">
                 @csrf
                 <input type="hidden" name="form_type" value="auto-allocate">
                 <button type="submit" class="btn" onclick="this.innerHTML='Generating...'; this.disabled=true; document.getElementById('autoGenForm').submit();">
-                    ⚙️ Auto Generate
+                    ⚙️ Auto Generate All
                 </button>
             </form>
             <form method="POST" action="/admin/classroom-allocation" style="display:inline;" onsubmit="return confirm('This will clear current allocations and re-generate. Continue?');" id="regenForm">
                 @csrf
                 <input type="hidden" name="form_type" value="re-generate">
                 <button type="submit" class="btn btn-danger" onclick="this.innerHTML='Re-Generating...'; this.disabled=true; document.getElementById('regenForm').submit();">
-                    🔄 Re-Generate
+                    🔄 Re-Generate All
                 </button>
             </form>
         </div>
@@ -210,7 +371,7 @@
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="6" style="text-align: center; padding: 24px;">No allocation records found. Click Auto Generate to start.</td></tr>
+                    <tr><td colspan="6" style="text-align: center; padding: 24px;">No allocation records found. Use the filter form above to auto-generate allocation for a specific class.</td></tr>
                 @endforelse
             </tbody>
         </table>

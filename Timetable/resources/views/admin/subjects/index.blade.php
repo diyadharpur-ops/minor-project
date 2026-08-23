@@ -3,6 +3,21 @@
 @section('title', 'Manage Subjects')
 
 @section('content')
+
+@php
+    if (!isset($groupedSubjects)) {
+        $subjects = \App\Models\Subject::with('department', 'division', 'faculty')->orderBy('semester')->orderBy('created_at', 'desc')->get();
+        $groupedSubjects = $subjects->groupBy('semester')->map(function ($semesterGroup) {
+            return $semesterGroup->groupBy(function ($subject) {
+                return $subject->division?->name ?? 'A';
+            });
+        });
+    }
+    if (!isset($searchResults)) {
+        $searchResults = collect();
+    }
+@endphp
+
     <style>
         .folder-structure {
             margin-top: 20px;

@@ -3,6 +3,24 @@
 @section('title', 'Create Subject')
 
 @section('content')
+
+@php
+    if (!isset($semesters)) {
+        $semesters = \App\Models\Division::select('semester')->distinct()->orderBy('semester')->get()->pluck('semester');
+    }
+    if (!isset($divisionsBySemester)) {
+        $divisionsBySemester = \App\Models\Division::all()->groupBy('semester')->mapWithKeys(function ($divisions, $semester) {
+            return [$semester => $divisions->values()];
+        });
+    }
+    if (!isset($departments)) {
+        $departments = \App\Models\Department::orderBy('name')->get();
+    }
+    if (!isset($faculties)) {
+        $faculties = \App\Models\Faculty::orderBy('name')->get();
+    }
+@endphp
+
     <div class="page-header">
         <div>
             <h1>Add Subject</h1>
