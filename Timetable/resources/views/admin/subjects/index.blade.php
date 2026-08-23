@@ -170,7 +170,7 @@
                                 <td>{{ $subject->name }}</td>
                                 <td>{{ $subject->subject_code }}</td>
                                 <td>{{ $subject->semester }}</td>
-                                <td>{{ $subject->division?->name ?? 'N/A' }}</td>
+                                <td>{{ $subject->division?->name ?? 'A' }}</td>
                                 <td>{{ $subject->department?->name ?? 'N/A' }}</td>
                                 <td>{{ $subject->credit }}</td>
                                 <td>{{ $subject->faculty?->name ?? $subject->faculty_name ?? 'N/A' }}</td>
@@ -228,7 +228,7 @@
                                                             <td>{{ $subject->name }}</td>
                                                             <td>{{ $subject->subject_code }}</td>
                                                             <td>{{ $subject->semester }}</td>
-                                                            <td>{{ $subject->division?->name ?? 'N/A' }}</td>
+                                                            <td>{{ $subject->division?->name ?? 'A' }}</td>
                                                             <td>{{ $subject->department?->name ?? 'N/A' }}</td>
                                                             <td>{{ $subject->credit }}</td>
                                                             <td>{{ $subject->faculty?->name ?? $subject->faculty_name ?? 'N/A' }}</td>

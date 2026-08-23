@@ -774,7 +774,7 @@ Route::get('/admin/subjects', function (Request $request) {
     // Group by semester and division
     $groupedSubjects = $subjects->groupBy('semester')->map(function ($semesterGroup) {
         return $semesterGroup->groupBy(function ($subject) {
-            return $subject->division?->name ?? 'N/A';
+            return $subject->division?->name ?? 'A';
         });
     });
 
