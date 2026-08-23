@@ -31,7 +31,23 @@ class TimetableGenerator
             throw new Exception("No classrooms found in the database. Please add classrooms before generating.");
         }
 
-        $subjects = Subject::where('department_id', $deptId)->where('semester', $semester)->get();
+        $divModel = \App\Models\Division::where('name', $division)->where('semester', $semester)->first();
+        
+        $subjects = collect();
+        if ($divModel) {
+            $subjects = Subject::where('department_id', $deptId)
+                ->where('semester', $semester)
+                ->where('division_id', $divModel->id)
+                ->get();
+        }
+        
+        if ($subjects->isEmpty()) {
+            $subjects = Subject::where('department_id', $deptId)
+                ->where('semester', $semester)
+                ->whereNull('division_id')
+                ->get();
+        }
+
         if ($subjects->isEmpty()) {
             return false;
         }
