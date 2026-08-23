@@ -786,6 +786,20 @@ Route::get('/admin/subjects/create', function () {
         return redirect('/admin/login');
     }
 
+    // Fix: Remove semesters 7 and 8
+    \App\Models\Division::whereIn('semester', ['7', '8'])->delete();
+
+    // Auto-seed some default divisions if empty
+    if (\App\Models\Division::count() === 0) {
+        $semesters = ['1', '2', '3', '4', '5', '6'];
+        $divisions = ['A', 'B', 'C'];
+        foreach ($semesters as $sem) {
+            foreach ($divisions as $div) {
+                \App\Models\Division::create(['name' => $div, 'semester' => $sem]);
+            }
+        }
+    }
+
     // Get all unique semesters from divisions
     $semesters = Division::select('semester')->distinct()->orderBy('semester')->get()->pluck('semester');
     
@@ -859,6 +873,17 @@ Route::get('/admin/subjects/{id}/edit', function ($id) {
     }
 
     $subject = Subject::with('department', 'division', 'faculty')->findOrFail($id);
+
+    // Auto-seed some default divisions if empty
+    if (\App\Models\Division::count() === 0) {
+        $semesters = ['1', '2', '3', '4', '5', '6'];
+        $divisions = ['A', 'B', 'C'];
+        foreach ($semesters as $sem) {
+            foreach ($divisions as $div) {
+                \App\Models\Division::create(['name' => $div, 'semester' => $sem]);
+            }
+        }
+    }
 
     // Get all unique semesters from divisions
     $semesters = Division::select('semester')->distinct()->orderBy('semester')->get()->pluck('semester');

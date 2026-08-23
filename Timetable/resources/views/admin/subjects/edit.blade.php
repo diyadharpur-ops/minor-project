@@ -40,7 +40,7 @@
             <div class="form-row">
                 <label>Division</label>
                 <select name="division_id" id="divisionSelect" required>
-                    <option value="">Select division</option>
+                    <option value="">Select a semester first</option>
                     @if (old('semester', $subject->semester) && isset($divisionsBySemester[old('semester', $subject->semester)]))
                         @foreach ($divisionsBySemester[old('semester', $subject->semester)] as $division)
                             <option value="{{ $division->id }}" {{ old('division_id', $subject->division_id) == $division->id ? 'selected' : '' }}>
