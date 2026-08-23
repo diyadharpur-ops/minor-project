@@ -11,15 +11,23 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('admins', function (Blueprint $table) {
-            $table->timestamp('password_changed_at')->nullable();
-        });
-        Schema::table('faculties', function (Blueprint $table) {
-            $table->timestamp('password_changed_at')->nullable();
-        });
-        Schema::table('users', function (Blueprint $table) {
-            $table->timestamp('password_changed_at')->nullable();
-        });
+        if (!Schema::hasColumn('admins', 'password_changed_at')) {
+            Schema::table('admins', function (Blueprint $table) {
+                $table->timestamp('password_changed_at')->nullable();
+            });
+        }
+
+        if (!Schema::hasColumn('faculties', 'password_changed_at')) {
+            Schema::table('faculties', function (Blueprint $table) {
+                $table->timestamp('password_changed_at')->nullable();
+            });
+        }
+
+        if (!Schema::hasColumn('users', 'password_changed_at')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->timestamp('password_changed_at')->nullable();
+            });
+        }
     }
 
     /**
@@ -27,14 +35,22 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('admins', function (Blueprint $table) {
-            $table->dropColumn('password_changed_at');
-        });
-        Schema::table('faculties', function (Blueprint $table) {
-            $table->dropColumn('password_changed_at');
-        });
-        Schema::table('users', function (Blueprint $table) {
-            $table->dropColumn('password_changed_at');
-        });
+        if (Schema::hasColumn('admins', 'password_changed_at')) {
+            Schema::table('admins', function (Blueprint $table) {
+                $table->dropColumn('password_changed_at');
+            });
+        }
+
+        if (Schema::hasColumn('faculties', 'password_changed_at')) {
+            Schema::table('faculties', function (Blueprint $table) {
+                $table->dropColumn('password_changed_at');
+            });
+        }
+
+        if (Schema::hasColumn('users', 'password_changed_at')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->dropColumn('password_changed_at');
+            });
+        }
     }
 };
