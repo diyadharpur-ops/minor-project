@@ -4,6 +4,7 @@ use App\Http\Controllers\ForgotPasswordController;
 use App\Http\Controllers\NotificationController;
 use App\Models\Classroom;
 use App\Models\Department;
+use App\Models\Division;
 use App\Models\Faculty;
 use App\Models\FacultyWorkload;
 use App\Models\Notification;
@@ -756,18 +757,28 @@ Route::get('/admin/subjects', function (Request $request) {
     }
 
     $q = $request->input('q');
-    $query = Subject::query()->with('department');
 
     if ($q) {
+        $query = Subject::query()->with('department', 'division', 'faculty');
         $query->where('name', 'like', "%{$q}%")
             ->orWhere('subject_code', 'like', "%{$q}%")
             ->orWhere('semester', 'like', "%{$q}%")
             ->orWhere('faculty_name', 'like', "%{$q}%");
+        $searchResults = $query->orderBy('created_at', 'desc')->get();
+        return view('admin.subjects.index', ['searchResults' => $searchResults, 'groupedSubjects' => collect()]);
     }
 
-    $subjects = $query->orderBy('created_at', 'desc')->get();
+    // Get all subjects grouped by semester and division
+    $subjects = Subject::with('department', 'division', 'faculty')->orderBy('semester')->orderBy('created_at', 'desc')->get();
 
-    return view('admin.subjects.index', ['subjects' => $subjects, 'q' => $q]);
+    // Group by semester and division
+    $groupedSubjects = $subjects->groupBy('semester')->map(function ($semesterGroup) {
+        return $semesterGroup->groupBy(function ($subject) {
+            return $subject->division?->name ?? 'N/A';
+        });
+    });
+
+    return view('admin.subjects.index', ['groupedSubjects' => $groupedSubjects]);
 });
 
 Route::get('/admin/subjects/create', function () {
@@ -775,7 +786,23 @@ Route::get('/admin/subjects/create', function () {
         return redirect('/admin/login');
     }
 
-    return view('admin.subjects.create', ['departments' => Department::orderBy('name')->get()]);
+    // Get all unique semesters from divisions
+    $semesters = Division::select('semester')->distinct()->orderBy('semester')->get()->pluck('semester');
+    
+    // Group divisions by semester
+    $divisionsBySemester = Division::all()->groupBy('semester')->mapWithKeys(function ($divisions, $semester) {
+        return [$semester => $divisions->values()];
+    });
+
+    $departments = Department::orderBy('name')->get();
+    $faculties = Faculty::orderBy('name')->get();
+
+    return view('admin.subjects.create', [
+        'semesters' => $semesters,
+        'divisionsBySemester' => $divisionsBySemester,
+        'departments' => $departments,
+        'faculties' => $faculties,
+    ]);
 });
 
 Route::post('/admin/subjects', function (Request $request) {
@@ -787,15 +814,25 @@ Route::post('/admin/subjects', function (Request $request) {
         'name' => 'required|string|max:255',
         'subject_code' => 'required|string|max:50|unique:subjects,subject_code',
         'semester' => 'required|string|max:20',
+        'division_id' => 'required|exists:divisions,id',
         'department_id' => 'required|exists:departments,id',
         'credit' => 'nullable|integer|min:1|max:10',
+        'faculty_id' => 'nullable|exists:faculties,id',
         'faculty_name' => 'nullable|string|max:255',
         'subject_type' => 'required|string|in:lecture,lab,tutorial',
     ]);
 
+    // If faculty_id is provided, get the faculty name; otherwise use the provided faculty_name
+    if ($data['faculty_id']) {
+        if ($faculty = Faculty::find($data['faculty_id'])) {
+            $data['faculty_name'] = $faculty->name;
+        }
+    }
+
     $subject = Subject::create($data);
 
     if ($department = Department::find($data['department_id'])) {
+        $division = Division::find($data['division_id']);
         $folder = 'subject-records/'.Str::slug($department->name).'/'.Str::slug((string) $subject->semester);
         Storage::disk('local')->makeDirectory($folder);
         $filePath = $folder.'/subject-'.$subject->id.'.json';
@@ -804,6 +841,7 @@ Route::post('/admin/subjects', function (Request $request) {
             'name' => $subject->name,
             'subject_code' => $subject->subject_code,
             'semester' => $subject->semester,
+            'division' => $division->name,
             'department' => $department->name,
             'credit' => $subject->credit,
             'faculty_name' => $subject->faculty_name,
@@ -820,9 +858,26 @@ Route::get('/admin/subjects/{id}/edit', function ($id) {
         return redirect('/admin/login');
     }
 
-    $subject = Subject::findOrFail($id);
+    $subject = Subject::with('department', 'division', 'faculty')->findOrFail($id);
 
-    return view('admin.subjects.edit', ['subject' => $subject, 'departments' => Department::orderBy('name')->get()]);
+    // Get all unique semesters from divisions
+    $semesters = Division::select('semester')->distinct()->orderBy('semester')->get()->pluck('semester');
+    
+    // Group divisions by semester
+    $divisionsBySemester = Division::all()->groupBy('semester')->mapWithKeys(function ($divisions, $semester) {
+        return [$semester => $divisions->values()];
+    });
+
+    $departments = Department::orderBy('name')->get();
+    $faculties = Faculty::orderBy('name')->get();
+
+    return view('admin.subjects.edit', [
+        'subject' => $subject,
+        'semesters' => $semesters,
+        'divisionsBySemester' => $divisionsBySemester,
+        'departments' => $departments,
+        'faculties' => $faculties,
+    ]);
 });
 
 Route::post('/admin/subjects/{id}', function (Request $request, $id) {
@@ -836,15 +891,25 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
         'name' => 'required|string|max:255',
         'subject_code' => 'required|string|max:50|unique:subjects,subject_code,'.$subject->id,
         'semester' => 'required|string|max:20',
+        'division_id' => 'required|exists:divisions,id',
         'department_id' => 'required|exists:departments,id',
         'credit' => 'nullable|integer|min:1|max:10',
+        'faculty_id' => 'nullable|exists:faculties,id',
         'faculty_name' => 'nullable|string|max:255',
         'subject_type' => 'required|string|in:lecture,lab,tutorial',
     ]);
 
+    // If faculty_id is provided, get the faculty name; otherwise use the provided faculty_name
+    if ($data['faculty_id']) {
+        if ($faculty = Faculty::find($data['faculty_id'])) {
+            $data['faculty_name'] = $faculty->name;
+        }
+    }
+
     $subject->update($data);
 
     if ($department = Department::find($data['department_id'])) {
+        $division = Division::find($data['division_id']);
         $folder = 'subject-records/'.Str::slug($department->name).'/'.Str::slug((string) $subject->semester);
         Storage::disk('local')->makeDirectory($folder);
         $filePath = $folder.'/subject-'.$subject->id.'.json';
@@ -858,6 +923,7 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
             'name' => $subject->name,
             'subject_code' => $subject->subject_code,
             'semester' => $subject->semester,
+            'division' => $division->name,
             'department' => $department->name,
             'credit' => $subject->credit,
             'faculty_name' => $subject->faculty_name,
