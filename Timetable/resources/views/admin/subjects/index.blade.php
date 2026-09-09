@@ -6,12 +6,8 @@
 
 @php
     if (!isset($groupedSubjects)) {
-        $subjects = \App\Models\Subject::with('department', 'division', 'faculty')->orderBy('semester')->orderBy('created_at', 'desc')->get();
-        $groupedSubjects = $subjects->groupBy('semester')->map(function ($semesterGroup) {
-            return $semesterGroup->groupBy(function ($subject) {
-                return $subject->division?->name ?? 'A';
-            });
-        });
+        $subjects = \App\Models\Subject::with('department', 'faculty')->orderBy('semester')->orderBy('created_at', 'desc')->get();
+        $groupedSubjects = $subjects->groupBy('semester');
     }
     if (!isset($searchResults)) {
         $searchResults = collect();
@@ -64,39 +60,6 @@
         .semester-content.collapsed {
             max-height: 0;
             border-top: none;
-        }
-        .division-folder {
-            margin: 12px 16px 12px 32px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            overflow: hidden;
-        }
-        .division-header {
-            background: #f9fafb;
-            padding: 8px 12px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-weight: 500;
-            user-select: none;
-        }
-        .division-header:hover {
-            background: #f3f4f6;
-        }
-        .division-header.collapsed::before {
-            content: '▶ 📂 ';
-        }
-        .division-header.expanded::before {
-            content: '▼ 📂 ';
-        }
-        .division-content {
-            max-height: 100vh;
-            overflow: hidden;
-            transition: max-height 0.3s ease;
-        }
-        .division-content.collapsed {
-            max-height: 0;
         }
         .subjects-table {
             width: 100%;
@@ -154,7 +117,7 @@
     <div class="page-header">
         <div class="page-header-left">
             <h1>Manage Subjects</h1>
-            <p>Organize subjects by semester and division.</p>
+            <p>Organize subjects by semester.</p>
         </div>
         <div class="page-actions">
             <a href="/admin/dashboard" class="btn btn-muted">Back</a>
@@ -165,7 +128,7 @@
     @if (request()->has('q'))
         <div class="page-card">
             <form method="GET" action="/admin/subjects" class="search">
-                <input type="text" name="q" placeholder="Search by name, code, semester, division, faculty" value="{{ request('q') }}" />
+                <input type="text" name="q" placeholder="Search by name, code, semester, department, faculty" value="{{ request('q') }}" />
                 <button type="submit" class="btn">Search</button>
                 <a href="/admin/subjects" class="btn btn-muted">Clear</a>
             </form>
@@ -177,7 +140,6 @@
                             <th>Name</th>
                             <th>Subject Code</th>
                             <th>Semester</th>
-                            <th>Division</th>
                             <th>Department</th>
                             <th>Lecture</th>
                             <th>Lab</th>
@@ -193,7 +155,6 @@
                                 <td>{{ $subject->name }}</td>
                                 <td>{{ $subject->subject_code }}</td>
                                 <td>{{ $subject->semester }}</td>
-                                <td>{{ $subject->division?->name ?? 'A' }}</td>
                                 <td>{{ $subject->department?->name ?? 'N/A' }}</td>
                                 <td>{{ $subject->lecture_credit ?? 0 }}</td>
                                 <td>{{ $subject->lab_credit ?? 0 }}</td>
@@ -220,17 +181,12 @@
                 <div class="no-data">No subjects found. Create your first subject by clicking the "Add Subject" button.</div>
             @else
                 <div class="folder-structure">
-                    @foreach ($groupedSubjects as $semester => $divisions)
+                    @foreach ($groupedSubjects as $semester => $subjects)
                         <div class="semester-folder">
                             <div class="semester-header expanded" onclick="toggleSemester(this)">
                                 📚 Semester {{ $semester }}
                             </div>
                             <div class="semester-content">
-                                @if ((string) $semester === '5')
-                                    @php
-                                        $semesterSubjects = collect($divisions)->flatten(1);
-                                    @endphp
-
                                     <table class="subjects-table">
                                         <thead>
                                             <tr>
@@ -246,7 +202,7 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            @foreach ($semesterSubjects as $subject)
+                                            @foreach ($subjects as $subject)
                                                 <tr>
                                                     <td>{{ $subject->name }}</td>
                                                     <td>{{ $subject->subject_code }}</td>
@@ -267,55 +223,6 @@
                                             @endforeach
                                         </tbody>
                                     </table>
-                                @else
-                                    @foreach ($divisions as $division => $subjects)
-                                        <div class="division-folder">
-                                            <div class="division-header expanded" onclick="toggleDivision(event)">
-                                                Division {{ $division }}
-                                            </div>
-                                            <div class="division-content">
-                                                <table class="subjects-table">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>Name</th>
-                                                            <th>Subject Code</th>
-                                                            <th>Semester</th>
-                                                            <th>Division</th>
-                                                            <th>Department</th>
-                                                            <th>Lecture</th>
-                                                            <th>Lab</th>
-                                                            <th>Tutorial</th>
-                                                            <th>Weekly Hours</th>
-                                                            <th>Actions</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        @foreach ($subjects as $subject)
-                                                            <tr>
-                                                                <td>{{ $subject->name }}</td>
-                                                                <td>{{ $subject->subject_code }}</td>
-                                                                <td>{{ $subject->semester }}</td>
-                                                                <td>{{ $subject->division?->name ?? 'A' }}</td>
-                                                                <td>{{ $subject->department?->name ?? 'N/A' }}</td>
-                                                                <td>{{ $subject->lecture_credit ?? 0 }}</td>
-                                                                <td>{{ $subject->lab_credit ?? 0 }}</td>
-                                                                <td>{{ $subject->tutorial_credit ?? 0 }}</td>
-                                                                <td>{{ $subject->weekly_hours }}</td>
-                                                                <td class="actions">
-                                                                    <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
-                                                                    <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
-                                                                        @csrf
-                                                                        <button type="submit" class="btn btn-danger">Delete</button>
-                                                                    </form>
-                                                                </td>
-                                                            </tr>
-                                                        @endforeach
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </div>
-                                    @endforeach
-                                @endif
                             </div>
                         </div>
                     @endforeach
@@ -348,12 +255,5 @@
             content.classList.toggle('collapsed');
         }
 
-        function toggleDivision(event) {
-            const header = event.currentTarget;
-            const content = header.nextElementSibling;
-            header.classList.toggle('collapsed');
-            header.classList.toggle('expanded');
-            content.classList.toggle('collapsed');
-        }
     </script>
 @endsection

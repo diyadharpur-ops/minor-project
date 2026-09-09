@@ -6,7 +6,7 @@
 
 @php
     if (!isset($semesters)) {
-        $semesters = \App\Models\Division::select('semester')->distinct()->orderBy('semester')->get()->pluck('semester');
+        $semesters = collect(range(1, 6));
     }
     if (!isset($departments)) {
         $departments = \App\Models\Department::orderBy('name')->get();

@@ -765,11 +765,16 @@ Route::get('/admin/subjects', function (Request $request) {
     $q = $request->input('q');
 
     if ($q) {
-        $query = Subject::query()->with('department', 'division', 'faculty');
-        $query->where('name', 'like', "%{$q}%")
-            ->orWhere('subject_code', 'like', "%{$q}%")
-            ->orWhere('semester', 'like', "%{$q}%")
-            ->orWhere('faculty_name', 'like', "%{$q}%");
+        $query = Subject::query()->with('department', 'faculty');
+        $query->where(function ($subjectQuery) use ($q) {
+            $subjectQuery->where('name', 'like', "%{$q}%")
+                ->orWhere('subject_code', 'like', "%{$q}%")
+                ->orWhere('semester', 'like', "%{$q}%")
+                ->orWhere('faculty_name', 'like', "%{$q}%")
+                ->orWhereHas('department', function ($departmentQuery) use ($q) {
+                    $departmentQuery->where('name', 'like', "%{$q}%");
+                });
+        });
         $searchResults = $query->orderBy('created_at', 'desc')->get();
 
         return view('admin.subjects.index', [
@@ -779,15 +784,8 @@ Route::get('/admin/subjects', function (Request $request) {
         ]);
     }
 
-    // Get all subjects grouped by semester and division
-    $subjects = Subject::with('department', 'division', 'faculty')->orderBy('semester')->orderBy('created_at', 'desc')->get();
-
-    // Group by semester and division
-    $groupedSubjects = $subjects->groupBy('semester')->map(function ($semesterGroup) {
-        return $semesterGroup->groupBy(function ($subject) {
-            return $subject->division?->name ?? 'A';
-        });
-    });
+    $subjects = Subject::with('department', 'faculty')->orderBy('semester')->orderBy('created_at', 'desc')->get();
+    $groupedSubjects = $subjects->groupBy('semester');
 
     return view('admin.subjects.index', [
         'groupedSubjects' => $groupedSubjects,
@@ -800,34 +798,17 @@ Route::get('/admin/subjects/create', function () {
         return redirect('/admin/login');
     }
 
-    // Fix: Remove semesters 7 and 8
-    Division::whereIn('semester', ['7', '8'])->delete();
-
-    // Auto-seed some default divisions if empty
-    if (Division::count() === 0) {
-        $semesters = ['1', '2', '3', '4', '5', '6'];
-        $divisions = ['A', 'B', 'C'];
-        foreach ($semesters as $sem) {
-            foreach ($divisions as $div) {
-                Division::create(['name' => $div, 'semester' => $sem]);
-            }
-        }
-    }
-
-    // Get all unique semesters from divisions
-    $semesters = Division::select('semester')->distinct()->orderBy('semester')->get()->pluck('semester');
-
-    // Group divisions by semester
-    $divisionsBySemester = Division::all()->groupBy('semester')->mapWithKeys(function ($divisions, $semester) {
-        return [$semester => $divisions->values()];
-    });
+    $semesters = collect(range(1, 6))
+        ->merge(Subject::query()->distinct()->orderBy('semester')->pluck('semester'))
+        ->unique()
+        ->sort(SORT_NATURAL)
+        ->values();
 
     $departments = Department::orderBy('name')->get();
     $faculties = Faculty::orderBy('name')->get();
 
     return view('admin.subjects.create', [
         'semesters' => $semesters,
-        'divisionsBySemester' => $divisionsBySemester,
         'departments' => $departments,
         'faculties' => $faculties,
     ]);
@@ -877,26 +858,12 @@ Route::get('/admin/subjects/{id}/edit', function ($id) {
         return redirect('/admin/login');
     }
 
-    $subject = Subject::with('department', 'division', 'faculty')->findOrFail($id);
-
-    // Auto-seed some default divisions if empty
-    if (Division::count() === 0) {
-        $semesters = ['1', '2', '3', '4', '5', '6'];
-        $divisions = ['A', 'B', 'C'];
-        foreach ($semesters as $sem) {
-            foreach ($divisions as $div) {
-                Division::create(['name' => $div, 'semester' => $sem]);
-            }
-        }
-    }
-
-    // Get all unique semesters from divisions
-    $semesters = Division::select('semester')->distinct()->orderBy('semester')->get()->pluck('semester');
-
-    // Group divisions by semester
-    $divisionsBySemester = Division::all()->groupBy('semester')->mapWithKeys(function ($divisions, $semester) {
-        return [$semester => $divisions->values()];
-    });
+    $subject = Subject::with('department', 'faculty')->findOrFail($id);
+    $semesters = collect(range(1, 6))
+        ->merge(Subject::query()->distinct()->orderBy('semester')->pluck('semester'))
+        ->unique()
+        ->sort(SORT_NATURAL)
+        ->values();
 
     $departments = Department::orderBy('name')->get();
     $faculties = Faculty::orderBy('name')->get();
@@ -904,7 +871,6 @@ Route::get('/admin/subjects/{id}/edit', function ($id) {
     return view('admin.subjects.edit', [
         'subject' => $subject,
         'semesters' => $semesters,
-        'divisionsBySemester' => $divisionsBySemester,
         'departments' => $departments,
         'faculties' => $faculties,
     ]);

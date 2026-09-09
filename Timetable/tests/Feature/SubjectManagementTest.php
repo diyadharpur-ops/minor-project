@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Department;
+use App\Models\Division;
 use App\Models\Subject;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -61,4 +62,40 @@ test('admin can create and list subjects with lecture and lab credits while leav
     $subject = Subject::latest()->first();
     expect($subject->folder_path)->not->toBeNull();
     expect(Storage::disk('local')->exists($subject->folder_path))->toBeTrue();
+});
+
+test('subject management groups only by semester and ignores legacy divisions', function () {
+    $department = Department::create([
+        'name' => 'Computer Engineering',
+        'code' => 'CE',
+        'description' => 'Computer Engineering Department',
+    ]);
+    $division = Division::create(['name' => 'A', 'semester' => '3']);
+
+    $subject = Subject::create([
+        'name' => 'Computer Networks',
+        'subject_code' => 'CE301',
+        'semester' => '3',
+        'department_id' => $department->id,
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+        'tutorial_credit' => 0,
+    ]);
+    $subject->forceFill(['division_id' => $division->id])->save();
+
+    $session = ['admin.auth' => ['name' => 'Admin User', 'email' => 'admin@example.com']];
+
+    $this->withSession($session)
+        ->get('/admin/subjects')
+        ->assertOk()
+        ->assertSee('Semester 3')
+        ->assertSee('Computer Networks')
+        ->assertDontSee('Division A')
+        ->assertDontSee('>Division</th>', false);
+
+    $this->withSession($session)
+        ->get('/admin/subjects?q=Computer+Engineering')
+        ->assertOk()
+        ->assertSee('Computer Networks')
+        ->assertDontSee('Division A');
 });
