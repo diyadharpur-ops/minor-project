@@ -16,6 +16,13 @@
     if (!isset($searchResults)) {
         $searchResults = collect();
     }
+    if (!isset($semesterWeeklyHours)) {
+        $semesterWeeklyHours = \App\Models\Subject::query()
+            ->get(['semester', 'lecture_credit', 'lab_credit', 'tutorial_credit'])
+            ->groupBy('semester')
+            ->map(fn ($semesterSubjects) => $semesterSubjects->sum('weekly_hours'))
+            ->sortKeys(SORT_NATURAL);
+    }
 @endphp
 
     <style>
@@ -175,6 +182,7 @@
                             <th>Lecture</th>
                             <th>Lab</th>
                             <th>Tutorial</th>
+                            <th>Weekly Hours</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -190,6 +198,7 @@
                                 <td>{{ $subject->lecture_credit ?? 0 }}</td>
                                 <td>{{ $subject->lab_credit ?? 0 }}</td>
                                 <td>{{ $subject->tutorial_credit ?? 0 }}</td>
+                                <td>{{ $subject->weekly_hours }}</td>
                                 <td class="actions">
                                     <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
                                     <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
@@ -232,6 +241,7 @@
                                                 <th>Lecture</th>
                                                 <th>Lab</th>
                                                 <th>Tutorial</th>
+                                                <th>Weekly Hours</th>
                                                 <th>Actions</th>
                                             </tr>
                                         </thead>
@@ -245,6 +255,7 @@
                                                     <td>{{ $subject->lecture_credit ?? 0 }}</td>
                                                     <td>{{ $subject->lab_credit ?? 0 }}</td>
                                                     <td>{{ $subject->tutorial_credit ?? 0 }}</td>
+                                                    <td>{{ $subject->weekly_hours }}</td>
                                                     <td class="actions">
                                                         <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
                                                         <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
@@ -274,6 +285,7 @@
                                                             <th>Lecture</th>
                                                             <th>Lab</th>
                                                             <th>Tutorial</th>
+                                                            <th>Weekly Hours</th>
                                                             <th>Actions</th>
                                                         </tr>
                                                     </thead>
@@ -288,6 +300,7 @@
                                                                 <td>{{ $subject->lecture_credit ?? 0 }}</td>
                                                                 <td>{{ $subject->lab_credit ?? 0 }}</td>
                                                                 <td>{{ $subject->tutorial_credit ?? 0 }}</td>
+                                                                <td>{{ $subject->weekly_hours }}</td>
                                                                 <td class="actions">
                                                                     <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
                                                                     <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
@@ -310,6 +323,22 @@
             @endif
         </div>
     @endif
+
+    <div class="page-card" style="margin-top: 20px;">
+        <h2 style="margin-top: 0;">Semester-wise Weekly Hours Summary</h2>
+        @if ($semesterWeeklyHours->isEmpty())
+            <div class="no-data">No weekly hours to summarize.</div>
+        @else
+            <div style="display: grid; gap: 8px;">
+                @foreach ($semesterWeeklyHours as $semester => $weeklyHours)
+                    <div style="display: flex; justify-content: space-between; padding: 10px 12px; background: #f9fafb; border-radius: 6px;">
+                        <strong>Semester {{ $semester }}</strong>
+                        <span>Total Weekly Hours: {{ $weeklyHours }} Hours</span>
+                    </div>
+                @endforeach
+            </div>
+        @endif
+    </div>
 
     <script>
         function toggleSemester(header) {

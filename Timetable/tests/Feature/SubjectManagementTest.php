@@ -38,7 +38,25 @@ test('admin can create and list subjects with lecture and lab credits while leav
         'tutorial_credit' => null,
     ]);
 
-    $this->get('/admin/subjects')->assertOk();
+    $this->withSession(['admin.auth' => [
+        'name' => 'Admin User',
+        'email' => 'admin@example.com',
+    ]])->post('/admin/subjects', [
+        'name' => 'Algorithms',
+        'subject_code' => 'CS102',
+        'semester' => '3',
+        'department_id' => $department->id,
+        'lecture_credit' => 2,
+        'lab_credit' => 0,
+        'tutorial_credit' => 1,
+    ])->assertRedirect('/admin/subjects');
+
+    $this->get('/admin/subjects')
+        ->assertOk()
+        ->assertSee('Semester-wise Weekly Hours Summary')
+        ->assertSee('Total Weekly Hours: 8 Hours')
+        ->assertSee('>5</td>', false)
+        ->assertSee('>3</td>', false);
 
     $subject = Subject::latest()->first();
     expect($subject->folder_path)->not->toBeNull();

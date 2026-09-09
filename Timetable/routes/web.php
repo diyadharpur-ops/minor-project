@@ -756,6 +756,12 @@ Route::get('/admin/subjects', function (Request $request) {
         return redirect('/admin/login');
     }
 
+    $semesterWeeklyHours = Subject::query()
+        ->get(['semester', 'lecture_credit', 'lab_credit', 'tutorial_credit'])
+        ->groupBy('semester')
+        ->map(fn ($semesterSubjects) => $semesterSubjects->sum('weekly_hours'))
+        ->sortKeys(SORT_NATURAL);
+
     $q = $request->input('q');
 
     if ($q) {
@@ -766,7 +772,11 @@ Route::get('/admin/subjects', function (Request $request) {
             ->orWhere('faculty_name', 'like', "%{$q}%");
         $searchResults = $query->orderBy('created_at', 'desc')->get();
 
-        return view('admin.subjects.index', ['searchResults' => $searchResults, 'groupedSubjects' => collect()]);
+        return view('admin.subjects.index', [
+            'searchResults' => $searchResults,
+            'groupedSubjects' => collect(),
+            'semesterWeeklyHours' => $semesterWeeklyHours,
+        ]);
     }
 
     // Get all subjects grouped by semester and division
@@ -779,7 +789,10 @@ Route::get('/admin/subjects', function (Request $request) {
         });
     });
 
-    return view('admin.subjects.index', ['groupedSubjects' => $groupedSubjects]);
+    return view('admin.subjects.index', [
+        'groupedSubjects' => $groupedSubjects,
+        'semesterWeeklyHours' => $semesterWeeklyHours,
+    ]);
 });
 
 Route::get('/admin/subjects/create', function () {

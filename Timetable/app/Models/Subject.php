@@ -18,6 +18,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class Subject extends Model
 {
+    public function getWeeklyHoursAttribute(): int
+    {
+        return ((int) ($this->lecture_credit ?? 0))
+            + ((int) ($this->lab_credit ?? 0) * 2)
+            + ((int) ($this->tutorial_credit ?? 0));
+    }
+
     public function department(): BelongsTo
     {
         return $this->belongsTo(Department::class);
