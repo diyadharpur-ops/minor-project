@@ -829,25 +829,17 @@ Route::post('/admin/subjects', function (Request $request) {
         'name' => 'required|string|max:255',
         'subject_code' => 'required|string|max:50|unique:subjects,subject_code',
         'semester' => 'required|string|max:20',
-        'division_id' => 'required|exists:divisions,id',
         'department_id' => 'required|exists:departments,id',
-        'credit' => 'nullable|integer|min:1|max:10',
-        'faculty_id' => 'nullable|exists:faculties,id',
-        'faculty_name' => 'nullable|string|max:255',
-        'subject_type' => 'required|string|in:lecture,lab,tutorial',
+        'lecture_credit' => 'required|integer|min:0|max:10',
+        'lab_credit' => 'required|integer|min:0|max:10',
+        'tutorial_credit' => 'nullable|integer|min:0|max:10',
     ]);
 
-    // If faculty_id is provided, get the faculty name; otherwise use the provided faculty_name
-    if ($data['faculty_id']) {
-        if ($faculty = Faculty::find($data['faculty_id'])) {
-            $data['faculty_name'] = $faculty->name;
-        }
-    }
+    $data['tutorial_credit'] = $request->filled('tutorial_credit') ? (int) $request->tutorial_credit : null;
 
     $subject = Subject::create($data);
 
     if ($department = Department::find($data['department_id'])) {
-        $division = Division::find($data['division_id']);
         $folder = 'subject-records/'.Str::slug($department->name).'/'.Str::slug((string) $subject->semester);
         Storage::disk('local')->makeDirectory($folder);
         $filePath = $folder.'/subject-'.$subject->id.'.json';
@@ -856,11 +848,10 @@ Route::post('/admin/subjects', function (Request $request) {
             'name' => $subject->name,
             'subject_code' => $subject->subject_code,
             'semester' => $subject->semester,
-            'division' => $division->name,
             'department' => $department->name,
-            'credit' => $subject->credit,
-            'faculty_name' => $subject->faculty_name,
-            'subject_type' => $subject->subject_type,
+            'lecture_credit' => $subject->lecture_credit,
+            'lab_credit' => $subject->lab_credit,
+            'tutorial_credit' => $subject->tutorial_credit,
         ], JSON_PRETTY_PRINT));
         $subject->update(['folder_path' => $filePath]);
     }
@@ -917,25 +908,17 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
         'name' => 'required|string|max:255',
         'subject_code' => 'required|string|max:50|unique:subjects,subject_code,'.$subject->id,
         'semester' => 'required|string|max:20',
-        'division_id' => 'required|exists:divisions,id',
         'department_id' => 'required|exists:departments,id',
-        'credit' => 'nullable|integer|min:1|max:10',
-        'faculty_id' => 'nullable|exists:faculties,id',
-        'faculty_name' => 'nullable|string|max:255',
-        'subject_type' => 'required|string|in:lecture,lab,tutorial',
+        'lecture_credit' => 'required|integer|min:0|max:10',
+        'lab_credit' => 'required|integer|min:0|max:10',
+        'tutorial_credit' => 'nullable|integer|min:0|max:10',
     ]);
 
-    // If faculty_id is provided, get the faculty name; otherwise use the provided faculty_name
-    if ($data['faculty_id']) {
-        if ($faculty = Faculty::find($data['faculty_id'])) {
-            $data['faculty_name'] = $faculty->name;
-        }
-    }
+    $data['tutorial_credit'] = $request->filled('tutorial_credit') ? (int) $request->tutorial_credit : null;
 
     $subject->update($data);
 
     if ($department = Department::find($data['department_id'])) {
-        $division = Division::find($data['division_id']);
         $folder = 'subject-records/'.Str::slug($department->name).'/'.Str::slug((string) $subject->semester);
         Storage::disk('local')->makeDirectory($folder);
         $filePath = $folder.'/subject-'.$subject->id.'.json';
@@ -949,11 +932,10 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
             'name' => $subject->name,
             'subject_code' => $subject->subject_code,
             'semester' => $subject->semester,
-            'division' => $division->name,
             'department' => $department->name,
-            'credit' => $subject->credit,
-            'faculty_name' => $subject->faculty_name,
-            'subject_type' => $subject->subject_type,
+            'lecture_credit' => $subject->lecture_credit,
+            'lab_credit' => $subject->lab_credit,
+            'tutorial_credit' => $subject->tutorial_credit,
         ], JSON_PRETTY_PRINT));
         $subject->update(['folder_path' => $filePath]);
     }

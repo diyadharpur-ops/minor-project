@@ -28,26 +28,13 @@
             </div>
             <div class="form-row">
                 <label>Semester</label>
-                <select name="semester" id="semesterSelect" required onchange="updateDivisions()">
+                <select name="semester" required>
                     <option value="">Select semester</option>
                     @foreach ($semesters as $semester)
                         <option value="{{ $semester }}" {{ old('semester', $subject->semester) == $semester ? 'selected' : '' }}>
                             Semester {{ $semester }}
                         </option>
                     @endforeach
-                </select>
-            </div>
-            <div class="form-row">
-                <label>Division</label>
-                <select name="division_id" id="divisionSelect" required>
-                    <option value="">Select a semester first</option>
-                    @if (old('semester', $subject->semester) && isset($divisionsBySemester[old('semester', $subject->semester)]))
-                        @foreach ($divisionsBySemester[old('semester', $subject->semester)] as $division)
-                            <option value="{{ $division->id }}" {{ old('division_id', $subject->division_id) == $division->id ? 'selected' : '' }}>
-                                Division {{ $division->name }}
-                            </option>
-                        @endforeach
-                    @endif
                 </select>
             </div>
             <div class="form-row">
@@ -62,27 +49,16 @@
                 </select>
             </div>
             <div class="form-row">
-                <label>Credit</label>
-                <input type="number" name="credit" min="1" max="10" value="{{ old('credit', $subject->credit) }}" />
+                <label>Lecture Credit</label>
+                <input type="number" name="lecture_credit" min="0" max="10" value="{{ old('lecture_credit', $subject->lecture_credit) }}" required />
             </div>
             <div class="form-row">
-                <label>Faculty</label>
-                <select name="faculty_id">
-                    <option value="">Select faculty</option>
-                    @foreach ($faculties as $faculty)
-                        <option value="{{ $faculty->id }}" {{ old('faculty_id', $subject->faculty_id) == $faculty->id ? 'selected' : '' }}>
-                            {{ $faculty->name }}
-                        </option>
-                    @endforeach
-                </select>
+                <label>Lab Credit</label>
+                <input type="number" name="lab_credit" min="0" max="10" value="{{ old('lab_credit', $subject->lab_credit) }}" required />
             </div>
             <div class="form-row">
-                <label>Subject Type</label>
-                <select name="subject_type" required>
-                    <option value="lecture" {{ old('subject_type', $subject->subject_type ?? 'lecture') === 'lecture' ? 'selected' : '' }}>Lecture</option>
-                    <option value="lab" {{ old('subject_type', $subject->subject_type) === 'lab' ? 'selected' : '' }}>Lab</option>
-                    <option value="tutorial" {{ old('subject_type', $subject->subject_type) === 'tutorial' ? 'selected' : '' }}>Tutorial</option>
-                </select>
+                <label>Tutorial Credit</label>
+                <input type="number" name="tutorial_credit" min="0" max="10" value="{{ old('tutorial_credit', $subject->tutorial_credit ?? '') }}" />
             </div>
             <div class="page-actions">
                 <button type="submit" class="btn">Save</button>
@@ -91,25 +67,4 @@
         </form>
     </div>
 
-    <script>
-        const divisionData = @json($divisionsBySemester);
-
-        function updateDivisions() {
-            const semesterSelect = document.getElementById('semesterSelect');
-            const divisionSelect = document.getElementById('divisionSelect');
-            const selectedSemester = semesterSelect.value;
-
-            // Clear existing options
-            divisionSelect.innerHTML = '<option value="">Select division</option>';
-
-            if (selectedSemester && divisionData[selectedSemester]) {
-                divisionData[selectedSemester].forEach(division => {
-                    const option = document.createElement('option');
-                    option.value = division.id;
-                    option.textContent = 'Division ' + division.name;
-                    divisionSelect.appendChild(option);
-                });
-            }
-        }
-    </script>
 @endsection

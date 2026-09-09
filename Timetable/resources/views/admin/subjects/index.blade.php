@@ -172,9 +172,9 @@
                             <th>Semester</th>
                             <th>Division</th>
                             <th>Department</th>
-                            <th>Credit</th>
-                            <th>Faculty</th>
-                            <th>Type</th>
+                            <th>Lecture</th>
+                            <th>Lab</th>
+                            <th>Tutorial</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -187,9 +187,9 @@
                                 <td>{{ $subject->semester }}</td>
                                 <td>{{ $subject->division?->name ?? 'A' }}</td>
                                 <td>{{ $subject->department?->name ?? 'N/A' }}</td>
-                                <td>{{ $subject->credit }}</td>
-                                <td>{{ $subject->faculty?->name ?? $subject->faculty_name ?? 'N/A' }}</td>
-                                <td>{{ ucfirst($subject->subject_type ?? 'Lecture') }}</td>
+                                <td>{{ $subject->lecture_credit ?? 0 }}</td>
+                                <td>{{ $subject->lab_credit ?? 0 }}</td>
+                                <td>{{ $subject->tutorial_credit ?? 0 }}</td>
                                 <td class="actions">
                                     <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
                                     <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
@@ -217,51 +217,92 @@
                                 📚 Semester {{ $semester }}
                             </div>
                             <div class="semester-content">
-                                @foreach ($divisions as $division => $subjects)
-                                    <div class="division-folder">
-                                        <div class="division-header expanded" onclick="toggleDivision(event)">
-                                            Division {{ $division }}
-                                        </div>
-                                        <div class="division-content">
-                                            <table class="subjects-table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Name</th>
-                                                        <th>Subject Code</th>
-                                                        <th>Semester</th>
-                                                        <th>Division</th>
-                                                        <th>Department</th>
-                                                        <th>Credit</th>
-                                                        <th>Faculty</th>
-                                                        <th>Type</th>
-                                                        <th>Actions</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    @foreach ($subjects as $subject)
+                                @if ((string) $semester === '5')
+                                    @php
+                                        $semesterSubjects = collect($divisions)->flatten(1);
+                                    @endphp
+
+                                    <table class="subjects-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Name</th>
+                                                <th>Subject Code</th>
+                                                <th>Semester</th>
+                                                <th>Department</th>
+                                                <th>Lecture</th>
+                                                <th>Lab</th>
+                                                <th>Tutorial</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach ($semesterSubjects as $subject)
+                                                <tr>
+                                                    <td>{{ $subject->name }}</td>
+                                                    <td>{{ $subject->subject_code }}</td>
+                                                    <td>{{ $subject->semester }}</td>
+                                                    <td>{{ $subject->department?->name ?? 'N/A' }}</td>
+                                                    <td>{{ $subject->lecture_credit ?? 0 }}</td>
+                                                    <td>{{ $subject->lab_credit ?? 0 }}</td>
+                                                    <td>{{ $subject->tutorial_credit ?? 0 }}</td>
+                                                    <td class="actions">
+                                                        <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
+                                                        <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
+                                                            @csrf
+                                                            <button type="submit" class="btn btn-danger">Delete</button>
+                                                        </form>
+                                                    </td>
+                                                </tr>
+                                            @endforeach
+                                        </tbody>
+                                    </table>
+                                @else
+                                    @foreach ($divisions as $division => $subjects)
+                                        <div class="division-folder">
+                                            <div class="division-header expanded" onclick="toggleDivision(event)">
+                                                Division {{ $division }}
+                                            </div>
+                                            <div class="division-content">
+                                                <table class="subjects-table">
+                                                    <thead>
                                                         <tr>
-                                                            <td>{{ $subject->name }}</td>
-                                                            <td>{{ $subject->subject_code }}</td>
-                                                            <td>{{ $subject->semester }}</td>
-                                                            <td>{{ $subject->division?->name ?? 'A' }}</td>
-                                                            <td>{{ $subject->department?->name ?? 'N/A' }}</td>
-                                                            <td>{{ $subject->credit }}</td>
-                                                            <td>{{ $subject->faculty?->name ?? $subject->faculty_name ?? 'N/A' }}</td>
-                                                            <td>{{ ucfirst($subject->subject_type ?? 'Lecture') }}</td>
-                                                            <td class="actions">
-                                                                <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
-                                                                <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
-                                                                    @csrf
-                                                                    <button type="submit" class="btn btn-danger">Delete</button>
-                                                                </form>
-                                                            </td>
+                                                            <th>Name</th>
+                                                            <th>Subject Code</th>
+                                                            <th>Semester</th>
+                                                            <th>Division</th>
+                                                            <th>Department</th>
+                                                            <th>Lecture</th>
+                                                            <th>Lab</th>
+                                                            <th>Tutorial</th>
+                                                            <th>Actions</th>
                                                         </tr>
-                                                    @endforeach
-                                                </tbody>
-                                            </table>
+                                                    </thead>
+                                                    <tbody>
+                                                        @foreach ($subjects as $subject)
+                                                            <tr>
+                                                                <td>{{ $subject->name }}</td>
+                                                                <td>{{ $subject->subject_code }}</td>
+                                                                <td>{{ $subject->semester }}</td>
+                                                                <td>{{ $subject->division?->name ?? 'A' }}</td>
+                                                                <td>{{ $subject->department?->name ?? 'N/A' }}</td>
+                                                                <td>{{ $subject->lecture_credit ?? 0 }}</td>
+                                                                <td>{{ $subject->lab_credit ?? 0 }}</td>
+                                                                <td>{{ $subject->tutorial_credit ?? 0 }}</td>
+                                                                <td class="actions">
+                                                                    <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
+                                                                    <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
+                                                                        @csrf
+                                                                        <button type="submit" class="btn btn-danger">Delete</button>
+                                                                    </form>
+                                                                </td>
+                                                            </tr>
+                                                        @endforeach
+                                                    </tbody>
+                                                </table>
+                                            </div>
                                         </div>
-                                    </div>
-                                @endforeach
+                                    @endforeach
+                                @endif
                             </div>
                         </div>
                     @endforeach

@@ -6,7 +6,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-test('admin can create and list subjects in department and semester folders', function () {
+test('admin can create and list subjects with lecture and lab credits while leaving tutorial credit optional', function () {
     $department = Department::create([
         'name' => 'Computer Science',
         'code' => 'CS',
@@ -21,9 +21,9 @@ test('admin can create and list subjects in department and semester folders', fu
         'subject_code' => 'CS101',
         'semester' => '3',
         'department_id' => $department->id,
-        'credit' => 3,
-        'faculty_name' => 'Dr. Jane Smith',
-        'subject_type' => 'lecture',
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+        'tutorial_credit' => '',
     ]);
 
     $response->assertRedirect('/admin/subjects');
@@ -33,9 +33,9 @@ test('admin can create and list subjects in department and semester folders', fu
         'subject_code' => 'CS101',
         'semester' => '3',
         'department_id' => $department->id,
-        'credit' => 3,
-        'faculty_name' => 'Dr. Jane Smith',
-        'subject_type' => 'lecture',
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+        'tutorial_credit' => null,
     ]);
 
     $this->get('/admin/subjects')->assertOk();

@@ -6,7 +6,16 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['name', 'subject_code', 'semester', 'division_id', 'department_id', 'credit', 'faculty_id', 'faculty_name', 'subject_type', 'folder_path'])]
+#[Fillable([
+    'name',
+    'subject_code',
+    'semester',
+    'department_id',
+    'lecture_credit',
+    'lab_credit',
+    'tutorial_credit',
+    'folder_path',
+])]
 class Subject extends Model
 {
     public function department(): BelongsTo
