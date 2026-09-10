@@ -47,10 +47,6 @@
                     @endforeach
                 </select>
             </div>
-            <div class="form-row">
-                <label>Subjects</label>
-                <textarea name="subjects" rows="4">{{ old('subjects', $faculty->subjects) }}</textarea>
-            </div>
             <div class="page-actions">
                 <button type="submit" class="btn">Save</button>
                 <a href="/admin/faculties" class="btn btn-muted">Cancel</a>

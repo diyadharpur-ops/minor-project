@@ -30,7 +30,6 @@
                         <th>Designation</th>
                         <th>Email</th>
                         <th>Department</th>
-                        <th>Subjects</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -42,7 +41,6 @@
                             <td>{{ $faculty->designation }}</td>
                             <td>{{ $faculty->email }}</td>
                             <td>{{ $faculty->department?->name ?? 'N/A' }}</td>
-                            <td>{{ $faculty->subjects }}</td>
                             <td class="actions">
                                 <a href="/admin/faculties/{{ $faculty->id }}/edit" class="btn btn-muted">Edit</a>
                                 <form method="POST" action="/admin/faculties/{{ $faculty->id }}/delete">
@@ -52,7 +50,7 @@
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="8">No faculty found.</td></tr>
+                        <tr><td colspan="7">No faculty found.</td></tr>
                     @endforelse
                 </tbody>
             </table>

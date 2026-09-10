@@ -508,7 +508,6 @@ Route::post('/admin/faculties', function (Request $request) {
         'email' => 'required|email|max:255|unique:faculties,email',
         'password' => 'required|string|min:8',
         'department_id' => 'required|exists:departments,id',
-        'subjects' => 'nullable|string|max:1000',
     ]);
 
     $faculty = Faculty::create($data);
@@ -525,7 +524,6 @@ Route::post('/admin/faculties', function (Request $request) {
             'designation' => $faculty->designation,
             'email' => $faculty->email,
             'department' => $department->name,
-            'subjects' => $faculty->subjects,
         ], JSON_PRETTY_PRINT));
         $faculty->update(['folder_path' => $filePath]);
     }
@@ -556,7 +554,6 @@ Route::post('/admin/faculties/{id}', function (Request $request, $id) {
         'email' => 'required|email|max:255|unique:faculties,email,'.$faculty->id,
         'password' => 'nullable|string|min:8',
         'department_id' => 'required|exists:departments,id',
-        'subjects' => 'nullable|string|max:1000',
     ]);
 
     if (empty($data['password'])) {
@@ -575,7 +572,6 @@ Route::post('/admin/faculties/{id}', function (Request $request, $id) {
             'designation' => $faculty->designation,
             'email' => $faculty->email,
             'department' => $department->name,
-            'subjects' => $faculty->subjects,
         ], JSON_PRETTY_PRINT));
         $faculty->update(['folder_path' => $filePath]);
     }
