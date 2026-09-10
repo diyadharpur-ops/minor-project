@@ -12,6 +12,7 @@ use App\Models\RoomAllocation;
 use App\Models\Subject;
 use App\Models\TimetableEntry;
 use App\Models\User;
+use App\Services\FacultyAllocationService;
 use App\Services\TimetableGenerator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -1023,6 +1024,71 @@ Route::post('/admin/classrooms/{id}/delete', function ($id) {
     }
 
     return redirect('/admin/classrooms');
+});
+
+Route::get('/admin/faculty-allocation', function (Request $request, FacultyAllocationService $service) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $batches = $service->batches();
+    $selectedBatch = $batches->firstWhere('key', $request->input('batch'));
+    $allocations = $service->allocations($selectedBatch, $request->only([
+        'department_id',
+        'semester',
+        'subject_id',
+        'faculty_id',
+        'classroom_id',
+        'subject_type',
+    ]));
+
+    return view('admin.faculty-allocation', [
+        'batches' => $batches,
+        'selectedBatch' => $selectedBatch,
+        'allocations' => $allocations,
+        'departments' => Department::orderBy('name')->get(),
+        'subjects' => Subject::orderBy('name')->get(['id', 'name']),
+        'faculties' => Faculty::orderBy('name')->get(['id', 'name']),
+        'classrooms' => Classroom::orderBy('room_number')->get(['id', 'room_number']),
+        'subjectTypes' => Subject::query()->whereNotNull('subject_type')->distinct()->orderBy('subject_type')->pluck('subject_type'),
+    ]);
+});
+
+Route::post('/admin/faculty-allocation/generate', function (Request $request, FacultyAllocationService $service) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $result = $service->generate();
+
+    if ($request->expectsJson()) {
+        return response()->json($result);
+    }
+
+    return redirect('/admin/faculty-allocation')
+        ->with('faculty_allocation_status', "Generated {$result['count']} faculty allocation records.")
+        ->with('faculty_allocation_warnings', $result['warnings']->all());
+});
+
+Route::get('/api/faculty-allocations', function (Request $request, FacultyAllocationService $service) {
+    if (! session('admin.auth')) {
+        return response()->json(['message' => 'Unauthenticated.'], 401);
+    }
+
+    $batches = $service->batches();
+    $selectedBatch = $batches->firstWhere('key', $request->input('batch'));
+
+    return response()->json([
+        'batches' => $batches,
+        'allocations' => $service->allocations($selectedBatch, $request->only([
+            'department_id',
+            'semester',
+            'subject_id',
+            'faculty_id',
+            'classroom_id',
+            'subject_type',
+        ])),
+    ]);
 });
 
 Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $request) {

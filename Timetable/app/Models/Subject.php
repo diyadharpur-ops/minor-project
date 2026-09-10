@@ -34,4 +34,9 @@ class Subject extends Model
     {
         return $this->belongsTo(Faculty::class);
     }
+
+    public function division(): BelongsTo
+    {
+        return $this->belongsTo(Division::class);
+    }
 }
