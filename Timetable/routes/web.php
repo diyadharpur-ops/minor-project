@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 Route::get('/', function () {
     return view('home');
@@ -753,7 +754,7 @@ Route::get('/admin/subjects', function (Request $request) {
         return redirect('/admin/login');
     }
 
-    $subjects = Subject::query()->with('department', 'faculty')->orderBy('semester')->orderBy('created_at', 'desc')->get();
+    $subjects = Subject::query()->with('department', 'faculty', 'division')->orderBy('semester')->orderBy('created_at', 'desc')->get();
 
     $semesterWeeklyHours = $subjects
         ->groupBy('semester')
@@ -762,6 +763,10 @@ Route::get('/admin/subjects', function (Request $request) {
                 ->where('semester', $semester)
                 ->orderBy('name')
                 ->get();
+            if ($divisions->isEmpty()) {
+                $divisions = collect(['A', 'B', 'C'])
+                    ->map(fn ($name) => (object) ['name' => $name]);
+            }
 
             $perClassWeeklyHours = (int) $semesterSubjects->sum('weekly_hours');
             $selectedClasses = $divisions->pluck('name')->all();
@@ -780,7 +785,7 @@ Route::get('/admin/subjects', function (Request $request) {
     $q = $request->input('q');
 
     if ($q) {
-        $query = Subject::query()->with('department', 'faculty');
+        $query = Subject::query()->with('department', 'faculty', 'division');
         $query->where(function ($subjectQuery) use ($q) {
             $subjectQuery->where('name', 'like', "%{$q}%")
                 ->orWhere('subject_code', 'like', "%{$q}%")
@@ -824,6 +829,7 @@ Route::get('/admin/subjects/create', function () {
     return view('admin.subjects.create', [
         'semesters' => $semesters,
         'departments' => $departments,
+        'divisions' => Division::query()->orderBy('semester')->orderBy('name')->get(),
         'faculties' => $faculties,
     ]);
 });
@@ -837,6 +843,11 @@ Route::post('/admin/subjects', function (Request $request) {
         'name' => 'required|string|max:255',
         'subject_code' => 'required|string|max:50|unique:subjects,subject_code',
         'semester' => 'required|string|max:20',
+        'division' => 'nullable|in:A,B,C',
+        'division_id' => [
+            'nullable',
+            Rule::exists('divisions', 'id')->where(fn ($query) => $query->where('semester', $request->input('semester'))),
+        ],
         'department_id' => 'required|exists:departments,id',
         'lecture_credit' => 'required|integer|min:0|max:10',
         'lab_credit' => 'required|integer|min:0|max:10',
@@ -844,6 +855,16 @@ Route::post('/admin/subjects', function (Request $request) {
     ]);
 
     $data['tutorial_credit'] = $request->filled('tutorial_credit') ? (int) $request->tutorial_credit : null;
+    $divisionName = $request->input('division');
+
+    if (! $divisionName && $request->filled('division_id')) {
+        $divisionName = Division::find($request->input('division_id'))?->name;
+    }
+
+    $data['division_id'] = $divisionName
+        ? Division::firstOrCreate(['name' => $divisionName, 'semester' => $data['semester']])->id
+        : null;
+    unset($data['division']);
 
     $subject = Subject::create($data);
 
@@ -856,6 +877,7 @@ Route::post('/admin/subjects', function (Request $request) {
             'name' => $subject->name,
             'subject_code' => $subject->subject_code,
             'semester' => $subject->semester,
+            'division' => $subject->division?->name,
             'department' => $department->name,
             'lecture_credit' => $subject->lecture_credit,
             'lab_credit' => $subject->lab_credit,
@@ -886,6 +908,7 @@ Route::get('/admin/subjects/{id}/edit', function ($id) {
         'subject' => $subject,
         'semesters' => $semesters,
         'departments' => $departments,
+        'divisions' => Division::query()->orderBy('semester')->orderBy('name')->get(),
         'faculties' => $faculties,
     ]);
 });
@@ -901,6 +924,11 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
         'name' => 'required|string|max:255',
         'subject_code' => 'required|string|max:50|unique:subjects,subject_code,'.$subject->id,
         'semester' => 'required|string|max:20',
+        'division' => 'nullable|in:A,B,C',
+        'division_id' => [
+            'nullable',
+            Rule::exists('divisions', 'id')->where(fn ($query) => $query->where('semester', $request->input('semester'))),
+        ],
         'department_id' => 'required|exists:departments,id',
         'lecture_credit' => 'required|integer|min:0|max:10',
         'lab_credit' => 'required|integer|min:0|max:10',
@@ -908,6 +936,16 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
     ]);
 
     $data['tutorial_credit'] = $request->filled('tutorial_credit') ? (int) $request->tutorial_credit : null;
+    $divisionName = $request->input('division');
+
+    if (! $divisionName && $request->filled('division_id')) {
+        $divisionName = Division::find($request->input('division_id'))?->name;
+    }
+
+    $data['division_id'] = $divisionName
+        ? Division::firstOrCreate(['name' => $divisionName, 'semester' => $data['semester']])->id
+        : null;
+    unset($data['division']);
 
     $subject->update($data);
 
@@ -925,6 +963,7 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
             'name' => $subject->name,
             'subject_code' => $subject->subject_code,
             'semester' => $subject->semester,
+            'division' => $subject->division?->name,
             'department' => $department->name,
             'lecture_credit' => $subject->lecture_credit,
             'lab_credit' => $subject->lab_credit,

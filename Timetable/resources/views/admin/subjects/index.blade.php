@@ -136,6 +136,7 @@
                             <th>Name</th>
                             <th>Subject Code</th>
                             <th>Semester</th>
+                            <th>Class</th>
                             <th>Department</th>
                             <th>Lecture</th>
                             <th>Lab</th>
@@ -151,6 +152,7 @@
                                 <td>{{ $subject->name }}</td>
                                 <td>{{ $subject->subject_code }}</td>
                                 <td>{{ $subject->semester }}</td>
+                                <td>{{ $subject->division?->name ?? 'All classes' }}</td>
                                 <td>{{ $subject->department?->name ?? 'N/A' }}</td>
                                 <td>{{ $subject->lecture_credit ?? 0 }}</td>
                                 <td>{{ $subject->lab_credit ?? 0 }}</td>
@@ -165,7 +167,7 @@
                                 </td>
                             </tr>
                         @empty
-                            <tr><td colspan="10" class="no-data">No subjects found.</td></tr>
+                            <tr><td colspan="11" class="no-data">No subjects found.</td></tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -230,6 +232,7 @@
                                                 <th>Name</th>
                                                 <th>Subject Code</th>
                                                 <th>Semester</th>
+                                                <th>Class</th>
                                                 <th>Department</th>
                                                 <th>Lecture</th>
                                                 <th>Lab</th>
@@ -244,6 +247,7 @@
                                                     <td>{{ $subject->name }}</td>
                                                     <td>{{ $subject->subject_code }}</td>
                                                     <td>{{ $subject->semester }}</td>
+                                                    <td>{{ $subject->division?->name ?? 'All classes' }}</td>
                                                     <td>{{ $subject->department?->name ?? 'N/A' }}</td>
                                                     <td>{{ $subject->lecture_credit ?? 0 }}</td>
                                                     <td>{{ $subject->lab_credit ?? 0 }}</td>

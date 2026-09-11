@@ -118,6 +118,43 @@ test('subject management shows per-class weekly hours and division totals per se
         ->assertSee('Overall Total Weekly Hours: 16 Hours');
 });
 
+test('admin can select a class for a subject and update it later', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+        'description' => 'Computer Science Department',
+    ]);
+    $classA = Division::create(['name' => 'A', 'semester' => '3']);
+    $classB = Division::create(['name' => 'B', 'semester' => '3']);
+    $session = ['admin.auth' => ['name' => 'Admin User', 'email' => 'admin@example.com']];
+
+    $this->withSession($session)->post('/admin/subjects', [
+        'name' => 'Operating Systems',
+        'subject_code' => 'CS301',
+        'semester' => '3',
+        'division_id' => $classA->id,
+        'department_id' => $department->id,
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+    ])->assertRedirect('/admin/subjects');
+
+    $subject = Subject::where('subject_code', 'CS301')->firstOrFail();
+    expect($subject->division_id)->toBe($classA->id);
+
+    $this->withSession($session)->post('/admin/subjects/'.$subject->id, [
+        'name' => $subject->name,
+        'subject_code' => $subject->subject_code,
+        'semester' => $subject->semester,
+        'division_id' => $classB->id,
+        'department_id' => $department->id,
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+    ])->assertRedirect('/admin/subjects');
+
+    expect($subject->fresh()->division_id)->toBe($classB->id);
+    $this->withSession($session)->get('/admin/subjects')->assertSee('>B</td>', false);
+});
+
 test('subject management groups only by semester and ignores legacy divisions', function () {
     $department = Department::create([
         'name' => 'Computer Engineering',

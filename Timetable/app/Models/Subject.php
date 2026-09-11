@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'name',
     'subject_code',
     'semester',
+    'division_id',
     'department_id',
     'lecture_credit',
     'lab_credit',

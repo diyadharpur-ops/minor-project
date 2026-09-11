@@ -48,6 +48,15 @@
                 </select>
             </div>
             <div class="form-row">
+                <label>Class / Division</label>
+                <select name="division">
+                    <option value="">Select class</option>
+                    <option value="A" {{ old('division') === 'A' ? 'selected' : '' }}>Class A</option>
+                    <option value="B" {{ old('division') === 'B' ? 'selected' : '' }}>Class B</option>
+                    <option value="C" {{ old('division') === 'C' ? 'selected' : '' }}>Class C</option>
+                </select>
+            </div>
+            <div class="form-row">
                 <label>Department</label>
                 <select name="department_id" required>
                     <option value="">Select department</option>
