@@ -58,15 +58,15 @@
                 </select>
             </div>
             <div class="form-row">
-                <label>Lecture Credit</label>
+                <label>Lecture Weekly Hours</label>
                 <input type="number" name="lecture_credit" min="0" max="10" value="{{ old('lecture_credit', $subject->lecture_credit) }}" required />
             </div>
             <div class="form-row">
-                <label>Lab Credit</label>
+                <label>Lab Weekly Hours</label>
                 <input type="number" name="lab_credit" min="0" max="10" value="{{ old('lab_credit', $subject->lab_credit) }}" required />
             </div>
             <div class="form-row">
-                <label>Tutorial Credit</label>
+                <label>Tutorial Weekly Hours</label>
                 <input type="number" name="tutorial_credit" min="0" max="10" value="{{ old('tutorial_credit', $subject->tutorial_credit ?? '') }}" />
             </div>
             <div class="page-actions">

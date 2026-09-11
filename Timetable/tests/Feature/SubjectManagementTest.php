@@ -155,6 +155,41 @@ test('admin can select a class for a subject and update it later', function () {
     $this->withSession($session)->get('/admin/subjects')->assertSee('>B</td>', false);
 });
 
+test('admin can select class A, B, or C directly from the subject form', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+        'description' => 'Computer Science Department',
+    ]);
+    $session = ['admin.auth' => ['name' => 'Admin User', 'email' => 'admin@example.com']];
+
+    $this->withSession($session)
+        ->get('/admin/subjects/create')
+        ->assertOk()
+        ->assertSee('Lecture Weekly Hours')
+        ->assertSee('Lab Weekly Hours')
+        ->assertSee('Tutorial Weekly Hours')
+        ->assertSee('value="A"', false)
+        ->assertSee('value="B"', false)
+        ->assertSee('value="C"', false);
+
+    $this->withSession($session)->post('/admin/subjects', [
+        'name' => 'Compiler Design',
+        'subject_code' => 'CS401',
+        'semester' => '7',
+        'department_id' => $department->id,
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+        'tutorial_credit' => 1,
+        'division' => 'C',
+    ])->assertRedirect('/admin/subjects');
+
+    $subject = Subject::where('subject_code', 'CS401')->firstOrFail();
+
+    expect($subject->division?->name)->toBe('C')
+        ->and($subject->weekly_hours)->toBe(6);
+});
+
 test('subject management groups only by semester and ignores legacy divisions', function () {
     $department = Department::create([
         'name' => 'Computer Engineering',
