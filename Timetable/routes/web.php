@@ -753,10 +753,28 @@ Route::get('/admin/subjects', function (Request $request) {
         return redirect('/admin/login');
     }
 
-    $semesterWeeklyHours = Subject::query()
-        ->get(['semester', 'lecture_credit', 'lab_credit', 'tutorial_credit'])
+    $subjects = Subject::query()->with('department', 'faculty')->orderBy('semester')->orderBy('created_at', 'desc')->get();
+
+    $semesterWeeklyHours = $subjects
         ->groupBy('semester')
-        ->map(fn ($semesterSubjects) => $semesterSubjects->sum('weekly_hours'))
+        ->map(function ($semesterSubjects, $semester) {
+            $divisions = Division::query()
+                ->where('semester', $semester)
+                ->orderBy('name')
+                ->get();
+
+            $perClassWeeklyHours = (int) $semesterSubjects->sum('weekly_hours');
+            $selectedClasses = $divisions->pluck('name')->all();
+            $totalClasses = count($selectedClasses);
+
+            return [
+                'per_class_hours' => $perClassWeeklyHours,
+                'divisions' => $divisions,
+                'selected_classes' => $selectedClasses,
+                'total_classes' => $totalClasses,
+                'total_hours' => $perClassWeeklyHours * $totalClasses,
+            ];
+        })
         ->sortKeys(SORT_NATURAL);
 
     $q = $request->input('q');
@@ -781,7 +799,6 @@ Route::get('/admin/subjects', function (Request $request) {
         ]);
     }
 
-    $subjects = Subject::with('department', 'faculty')->orderBy('semester')->orderBy('created_at', 'desc')->get();
     $groupedSubjects = $subjects->groupBy('semester');
 
     return view('admin.subjects.index', [
