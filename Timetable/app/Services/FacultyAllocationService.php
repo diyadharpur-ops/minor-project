@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Classroom;
 use App\Models\Department;
 use App\Models\Division;
+use App\Models\Faculty;
 use App\Models\FacultyWorkload;
 use App\Models\RoomAllocation;
 use App\Models\Subject;
@@ -242,20 +243,82 @@ class FacultyAllocationService
             ->first();
     }
 
-    private function findFacultyForSubject(Subject $subject, array $batch): ?\App\Models\Faculty
+    private function findFacultyForSubject(Subject $subject, array $batch): ?Faculty
     {
         if ($subject->faculty_id) {
             return $subject->faculty;
         }
 
         $department = Department::find($batch['department_id']);
-        $query = \App\Models\Faculty::query();
+        $query = Faculty::query();
 
         if ($department) {
             $query->where('department_id', $department->id);
         }
 
-        return $query->orderBy('name')->first();
+        $facultyCandidates = $query->orderBy('name')->get();
+
+        if ($facultyCandidates->isEmpty()) {
+            return null;
+        }
+
+        $assignedHours = $this->assignedHoursForBatch($batch);
+        $normalThreshold = (int) config('faculty_workload.normal_threshold', 18);
+
+        $eligible = $facultyCandidates->filter(function (Faculty $faculty) use ($assignedHours, $normalThreshold): bool {
+            $workload = FacultyWorkload::query()
+                ->where('faculty_id', (string) $faculty->id)
+                ->first();
+
+            if ($workload && $workload->workload_status === 'Overloaded') {
+                return false;
+            }
+
+            $effectiveLoad = (int) ($assignedHours[$faculty->id] ?? 0) + (int) ($workload?->total_hours ?? 0);
+
+            return $effectiveLoad < $normalThreshold;
+        });
+
+        $candidates = $eligible->isNotEmpty() ? $eligible : $facultyCandidates;
+        $sorted = $candidates->all();
+
+        usort($sorted, function (Faculty $left, Faculty $right) use ($assignedHours): int {
+            $leftWorkload = (int) ($assignedHours[$left->id] ?? 0) + (int) FacultyWorkload::query()
+                ->where('faculty_id', (string) $left->id)
+                ->value('total_hours');
+            $rightWorkload = (int) ($assignedHours[$right->id] ?? 0) + (int) FacultyWorkload::query()
+                ->where('faculty_id', (string) $right->id)
+                ->value('total_hours');
+
+            if ($leftWorkload !== $rightWorkload) {
+                return $leftWorkload <=> $rightWorkload;
+            }
+
+            return strcmp(strtolower($left->name), strtolower($right->name));
+        });
+
+        return $sorted[0] ?? $candidates->first();
+    }
+
+    private function assignedHoursForBatch(array $batch): array
+    {
+        $hoursByFaculty = [];
+
+        RoomAllocation::query()
+            ->where('department_id', $batch['department_id'])
+            ->where('semester', $batch['semester'])
+            ->with('subject')
+            ->get()
+            ->each(function (RoomAllocation $allocation) use (&$hoursByFaculty): void {
+                if (empty($allocation->faculty_id)) {
+                    return;
+                }
+
+                $subjectHours = (int) ($allocation->subject?->weekly_hours ?? 0);
+                $hoursByFaculty[$allocation->faculty_id] = ($hoursByFaculty[$allocation->faculty_id] ?? 0) + $subjectHours;
+            });
+
+        return $hoursByFaculty;
     }
 
     private function makeBatch(Department $department, string $semester, ?string $name = null, ?int $divisionId = null): array

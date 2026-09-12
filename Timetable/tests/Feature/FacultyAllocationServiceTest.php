@@ -3,6 +3,7 @@
 use App\Models\Department;
 use App\Models\Faculty;
 use App\Models\FacultyWorkload;
+use App\Models\RoomAllocation;
 use App\Models\Subject;
 use App\Models\User;
 use App\Services\FacultyAllocationService;
@@ -64,6 +65,71 @@ test('faculty allocation service uses real project data and subject metadata', f
         ->and($batches->pluck('name')->unique()->sort()->values()->all())->toBe(['A', 'B', 'C'])
         ->and($subject->fresh()->subject_type)->toBe('Theory')
         ->and($subject->fresh()->weekly_hours)->toBe(4);
+});
+
+test('faculty allocation service balances workload across faculty for the same semester', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+
+    $facultyA = Faculty::create([
+        'name' => 'Dr. A. Mehta',
+        'email' => 'a.mehta@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+
+    $facultyB = Faculty::create([
+        'name' => 'Dr. B. Shah',
+        'email' => 'b.shah@example.com',
+        'designation' => 'Associate Professor',
+        'department_id' => $department->id,
+    ]);
+
+    $facultyC = Faculty::create([
+        'name' => 'Dr. C. Patel',
+        'email' => 'c.patel@example.com',
+        'designation' => 'Assistant Professor',
+        'department_id' => $department->id,
+    ]);
+
+    foreach ([
+        ['Operating Systems', 'CS-501', 4],
+        ['Database Systems', 'CS-502', 4],
+        ['Compiler Design', 'CS-503', 4],
+        ['Software Engineering', 'CS-504', 4],
+    ] as [$name, $code, $hours]) {
+        Subject::create([
+            'name' => $name,
+            'subject_code' => $code,
+            'semester' => '5',
+            'department_id' => $department->id,
+            'subject_type' => 'Theory',
+            'lecture_credit' => $hours,
+            'lab_credit' => 0,
+            'tutorial_credit' => 0,
+        ]);
+    }
+
+    $service = new FacultyAllocationService();
+    $selection = ['department_id' => $department->id, 'semester' => '5', 'batch' => $department->id.'|5|A'];
+    $result = $service->generateForSelection($selection);
+
+    $groupedLoads = RoomAllocation::query()
+        ->where('department_id', $department->id)
+        ->where('semester', '5')
+        ->where('class_name', $department->name.'-5-A')
+        ->with('subject')
+        ->get()
+        ->groupBy('faculty_id')
+        ->map(fn ($allocations) => $allocations->sum(fn ($allocation) => (int) ($allocation->subject?->weekly_hours ?? 0)))
+        ->values()
+        ->all();
+
+    expect($result['count'])->toBe(4)
+        ->and($groupedLoads)->toHaveCount(3)
+        ->and(max($groupedLoads) - min($groupedLoads))->toBeLessThanOrEqual(4);
 });
 
 test('admin faculty allocation page derives semester and division options from available batches and shows lecture lab tutorial details', function () {
