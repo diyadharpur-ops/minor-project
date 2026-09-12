@@ -4,167 +4,177 @@
 
 @section('content')
 <style>
-    .allocation-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; }
-    .batch-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0; }
-    .batch-tab { padding: 9px 14px; border: 1px solid #cbd5e1; border-radius: 8px; color: #334155; text-decoration: none; background: #f8fafc; font-weight: 600; }
-    .batch-tab.active { color: white; background: #2563eb; border-color: #2563eb; }
-    .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; }
-    .filter-grid label { display: block; margin-bottom: 5px; color: #475569; font-size: 0.8rem; font-weight: 700; }
-    .filter-grid select { width: 100%; padding: 9px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; }
-    .compact-list { display: grid; gap: 8px; margin-top: 16px; }
-    .compact-row { padding: 10px 12px; border-left: 3px solid #2563eb; background: #f8fafc; color: #334155; }
-    .warning { padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+    .faculty-allocation-shell { background: #eef4fb; min-height: 100%; }
+    .faculty-allocation-page { padding: 24px; }
+    .faculty-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04); }
+    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+    .page-header-row h1 { margin: 0; color: #1f2937; font-size: 2rem; }
+    .page-header-row p { margin: 4px 0 0; color: #64748b; }
+    .batch-card { padding: 18px 20px 14px; margin-bottom: 18px; }
+    .batch-header { margin: 0 0 12px; font-size: 1.05rem; font-weight: 700; color: #1f2937; }
+    .batch-list { display: flex; flex-wrap: wrap; gap: 10px; }
+    .batch-pill { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 8px; border: 1px solid #dbeafe; background: #f8fbff; color: #334155; font-weight: 600; text-decoration: none; }
+    .batch-pill.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+    .batch-pill small { font-size: 0.76rem; opacity: 0.9; }
+    .filter-card { padding: 18px 20px; margin-bottom: 18px; }
+    .filter-row { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 16px; align-items: end; }
+    .field-group { display: flex; flex-direction: column; gap: 6px; }
+    .field-group label { font-size: 0.78rem; font-weight: 700; color: #475569; }
+    .field-group select { width: 100%; padding: 10px 12px; border: 1px solid #dbe2ea; border-radius: 8px; background: #fff; color: #1f2937; }
+    .generate-wrap { display: flex; align-items: end; justify-content: flex-end; }
+    .btn-primary { border: none; border-radius: 8px; background: linear-gradient(180deg, #2a6ae6 0%, #1f5bc7 100%); color: #fff; font-weight: 700; padding: 10px 18px; cursor: pointer; }
+    .details-card { padding: 18px 20px; }
+    .details-title { margin: 0 0 12px; font-size: 1.2rem; color: #1f2937; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 760px; }
+    th { background: #f8fafc; color: #475569; text-align: left; padding: 12px 14px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid #e2e8f0; }
+    td { padding: 12px 14px; border-bottom: 1px solid #edf2f7; color: #334155; }
+    tbody tr:hover { background: #f8fbff; }
     .muted { color: #64748b; }
+    .status-note { padding: 10px 12px; margin-bottom: 12px; border-radius: 8px; background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; }
+    .warning-box { padding: 10px 12px; margin-bottom: 12px; border-radius: 8px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a4d00; }
+    @media (max-width: 900px) {
+        .filter-row { grid-template-columns: 1fr; }
+        .generate-wrap { justify-content: flex-start; }
+    }
 </style>
 
-<div class="page-header">
-    <div>
-        <h1>Faculty Allocation</h1>
-        <p>Batch-wise subject, faculty, and classroom or lab allocation.</p>
-    </div>
-    <form method="POST" action="{{ url('/admin/faculty-allocation/generate') }}">
-        @csrf
-        <button class="btn" type="submit">Auto Generate Faculty Allocation</button>
-    </form>
-</div>
+<div class="faculty-allocation-shell">
+    <div class="faculty-allocation-page">
+        <div class="page-header-row">
+            <div>
+                <h1>Faculty Allocation</h1>
+            </div>
+        </div>
 
-@if (session('faculty_allocation_status'))
-    <div class="alert alert-success">{{ session('faculty_allocation_status') }}</div>
-@endif
+        @if (session('faculty_allocation_status'))
+            <div class="status-note">{{ session('faculty_allocation_status') }}</div>
+        @endif
 
-@if (session('faculty_allocation_warnings'))
-    <div class="page-card">
-        <h3>Validation Warnings</h3>
-        @foreach (session('faculty_allocation_warnings') as $warning)
-            <div class="warning">{{ $warning }}</div>
-        @endforeach
-    </div>
-@endif
+        @if (session('faculty_allocation_warnings'))
+            <div class="warning-box">
+                @foreach (session('faculty_allocation_warnings') as $warning)
+                    <div>{{ $warning }}</div>
+                @endforeach
+            </div>
+        @endif
 
-<div class="page-card">
-    <div class="allocation-toolbar">
-        <div>
-            <h2 style="margin: 0;">Available Batches</h2>
-            <div class="muted" style="margin-top: 4px;">Select a batch to isolate its subjects.</div>
-        </div>
-    </div>
-    <div class="batch-tabs">
-        @foreach ($batches as $batch)
-            <a class="batch-tab {{ (($selectedBatch['key'] ?? null) === $batch['key']) ? 'active' : '' }}"
-                href="{{ url('/admin/faculty-allocation') }}?batch={{ urlencode($batch['key']) }}">
-                {{ $batch['name'] }}
-                <span class="muted">({{ $batch['department_name'] }} · {{ $batch['semester'] }})</span>
-            </a>
-        @endforeach
-    </div>
-    @if ($batches->isEmpty())
-        <p class="muted">No batches or classes found in the existing student, division, or subject data.</p>
-    @endif
-</div>
-
-<div class="page-card">
-    <form method="GET" action="{{ url('/admin/faculty-allocation') }}" class="filter-grid">
-        <input type="hidden" name="batch" value="{{ request('batch') }}">
-        <div>
-            <label for="department_id">Department</label>
-            <select id="department_id" name="department_id">
-                <option value="">All departments</option>
-                @foreach ($departments as $department)
-                    <option value="{{ $department->id }}" @selected(request('department_id') == $department->id)>{{ $department->name }}</option>
-                @endforeach
-            </select>
-        </div>
-        <div>
-            <label for="semester">Semester</label>
-            <select id="semester" name="semester">
-                <option value="">All semesters</option>
-                @foreach ($batches->pluck('semester')->unique() as $semester)
-                    <option value="{{ $semester }}" @selected(request('semester') == $semester)>Semester {{ $semester }}</option>
-                @endforeach
-            </select>
-        </div>
-        <div>
-            <label for="subject_id">Subject</label>
-            <select id="subject_id" name="subject_id">
-                <option value="">All subjects</option>
-                @foreach ($subjects as $subject)
-                    <option value="{{ $subject->id }}" @selected(request('subject_id') == $subject->id)>{{ $subject->name }}</option>
-                @endforeach
-            </select>
-        </div>
-        <div>
-            <label for="faculty_id">Faculty</label>
-            <select id="faculty_id" name="faculty_id">
-                <option value="">All faculty</option>
-                @foreach ($faculties as $faculty)
-                    <option value="{{ $faculty->id }}" @selected(request('faculty_id') == $faculty->id)>{{ $faculty->name }}</option>
-                @endforeach
-            </select>
-        </div>
-        <div>
-            <label for="classroom_id">Location</label>
-            <select id="classroom_id" name="classroom_id">
-                <option value="">All locations</option>
-                @foreach ($classrooms as $classroom)
-                    <option value="{{ $classroom->id }}" @selected(request('classroom_id') == $classroom->id)>{{ $classroom->room_number }}</option>
-                @endforeach
-            </select>
-        </div>
-        <div>
-            <label for="subject_type">Subject type</label>
-            <select id="subject_type" name="subject_type">
-                <option value="">All types</option>
-                @foreach ($subjectTypes as $subjectType)
-                    <option value="{{ $subjectType }}" @selected(request('subject_type') == $subjectType)>{{ $subjectType }}</option>
-                @endforeach
-            </select>
-        </div>
-        <button class="btn" type="submit">Apply Filters</button>
-    </form>
-</div>
-
-<div class="page-card">
-    <h2>{{ $selectedBatch['name'] ?? 'All' }} Faculty Allocation</h2>
-    @if ($selectedBatch && $allocations->isEmpty())
-        <p class="muted">No subjects found for this batch. Run Auto Generate after the source data is configured.</p>
-    @elseif (! $selectedBatch && $allocations->isEmpty())
-        <p class="muted">No allocation records found. Run Auto Generate Faculty Allocation.</p>
-    @else
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Batch / Class</th>
-                        <th>Subject</th>
-                        <th>Faculty</th>
-                        <th>Location</th>
-                        <th>Type</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach ($allocations as $allocation)
-                        <tr>
-                            <td>{{ $allocation['batch'] ?: '—' }}</td>
-                            <td>{{ $allocation['subject'] ?: '—' }}</td>
-                            <td>{{ $allocation['faculty'] ?: 'Faculty is not assigned to this subject.' }}</td>
-                            <td>{{ $allocation['location'] ?: 'No classroom/lab location assigned.' }}</td>
-                            <td>{{ $allocation['type'] }}</td>
-                            <td>{{ $allocation['status'] }}</td>
-                        </tr>
+        <div class="faculty-card batch-card">
+            <h2 class="batch-header">Available Batches</h2>
+            @if ($batches->isEmpty())
+                <div class="muted">No batches available.</div>
+            @else
+                <div class="batch-list">
+                    @foreach ($batches as $batch)
+                        @php
+                            $active = ($selectedBatchKey ?? null) === $batch['key'];
+                            $batchUrl = url('/admin/faculty-allocation') . '?' . http_build_query([
+                                'department_id' => request('department_id'),
+                                'semester' => request('semester'),
+                                'division' => request('division'),
+                                'batch' => $batch['key'],
+                            ]);
+                        @endphp
+                        <a href="{{ $batchUrl }}" class="batch-pill {{ $active ? 'active' : '' }}">
+                            {{ $batch['name'] }}
+                            <small>({{ $batch['department_name'] }} - {{ $batch['semester'] }})</small>
+                        </a>
                     @endforeach
-                </tbody>
-            </table>
+                </div>
+            @endif
         </div>
 
-        <h3 style="margin-top: 24px;">Compact Allocation</h3>
-        <div class="compact-list">
-            @foreach ($allocations as $allocation)
-                <div class="compact-row">
-                    {{ $allocation['batch'] ?: '—' }} - {{ $allocation['subject'] ?: '—' }} - {{ $allocation['faculty'] ?: 'Faculty is not assigned to this subject.' }} - {{ $allocation['location'] ?: 'No classroom/lab location assigned.' }}
+        <div class="faculty-card filter-card">
+            <form method="GET" action="{{ url('/admin/faculty-allocation') }}">
+                <div class="filter-row">
+                    <div class="field-group">
+                        <label for="department_id">Department</label>
+                        <select id="department_id" name="department_id" onchange="this.form.submit()">
+                            <option value="">Select Department</option>
+                            @foreach ($departments as $department)
+                                <option value="{{ $department->id }}" @selected((string) $selectedDepartmentId === (string) $department->id)>{{ $department->name }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <div class="field-group">
+                        <label for="semester">Semester</label>
+                        <select id="semester" name="semester" onchange="this.form.submit()">
+                            <option value="">Select Semester</option>
+                            @foreach ($semesterOptions as $semesterOption)
+                                <option value="{{ $semesterOption }}" @selected((string) $selectedSemester === (string) $semesterOption)>Semester {{ $semesterOption }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <div class="field-group">
+                        <label for="division">Class / Division</label>
+                        <select id="division" name="division" onchange="this.form.submit()">
+                            <option value="">Select Class / Division</option>
+                            @foreach ($divisionOptions as $divisionOption)
+                                <option value="{{ $divisionOption }}" @selected((string) $selectedDivision === (string) $divisionOption)>{{ $divisionOption }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <div class="generate-wrap">
+                        <form method="POST" action="{{ url('/admin/faculty-allocation/generate') }}" style="display:inline;">
+                            @csrf
+                            <input type="hidden" name="department_id" value="{{ $selectedDepartmentId }}">
+                            <input type="hidden" name="semester" value="{{ $selectedSemester }}">
+                            <input type="hidden" name="division" value="{{ $selectedDivision }}">
+                            <input type="hidden" name="batch" value="{{ $selectedBatchKey }}">
+                            <button type="submit" class="btn-primary">⚙ Auto Generate Faculty Allocation</button>
+                        </form>
+                    </div>
                 </div>
-            @endforeach
+            </form>
         </div>
-    @endif
+
+        <div class="faculty-card details-card">
+            <h2 class="details-title">Faculty Allocation Details</h2>
+
+            @if ($selectedBatch && $allocations->isEmpty())
+                <div class="muted">No subjects available for the selected semester.</div>
+            @elseif (! $selectedBatch)
+                <div class="muted">No batches available.</div>
+            @else
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Sr. No.</th>
+                                <th>Subject</th>
+                                <th>Subject Type</th>
+                                <th>Faculty</th>
+                                <th>Batch</th>
+                                <th>Weekly Hours</th>
+                                <th>Allocation Type</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($allocations as $index => $allocation)
+                                @php
+                                    $subject = $allocation->subject;
+                                    $subjectType = $subject?->subject_type ?? 'Theory';
+                                    $allocationType = str_contains(strtolower((string) $subjectType), 'lab') || str_contains(strtolower((string) $subjectType), 'practical') ? 'Lab' : (str_contains(strtolower((string) $subjectType), 'tutorial') ? 'Tutorial' : 'Lecture');
+                                    $weeklyHours = (int) optional($subject)->weekly_hours ?? 0;
+                                @endphp
+                                <tr>
+                                    <td>{{ $index + 1 }}</td>
+                                    <td>{{ $subject?->name ?? '—' }}</td>
+                                    <td>{{ $subjectType }}</td>
+                                    <td>{{ $allocation->faculty?->name ?? ($subject?->faculty?->name ?? '—') }}</td>
+                                    <td>{{ $allocation->class_name ?: ($selectedBatch['class_name'] ?? '—') }}</td>
+                                    <td>{{ $weeklyHours }}</td>
+                                    <td>{{ $allocationType }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
+        </div>
+    </div>
 </div>
 @endsection

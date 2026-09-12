@@ -68,6 +68,22 @@ class FacultyAllocationService
                 }
             });
 
+        if ($batches->isEmpty()) {
+            Department::query()->orderBy('name')->get()->each(function (Department $department) use ($batches): void {
+                Subject::query()
+                    ->where('department_id', $department->id)
+                    ->select('semester')
+                    ->distinct()
+                    ->pluck('semester')
+                    ->filter()
+                    ->each(function ($semester) use ($department, $batches): void {
+                        foreach (['A', 'B', 'C'] as $division) {
+                            $batches->push($this->makeBatch($department, (string) $semester, $division));
+                        }
+                    });
+            });
+        }
+
         return $batches
             ->unique(fn (array $batch): string => $batch['key'])
             ->sortBy(['department_name', 'semester', 'name'])
@@ -97,16 +113,29 @@ class FacultyAllocationService
             $query->whereHas('subject', fn ($subjectQuery) => $subjectQuery->where('subject_type', $filters['subject_type']));
         }
 
-        return $query->get()->map(fn (RoomAllocation $allocation): array => $this->formatAllocation($allocation));
+        return $query->get();
     }
 
     public function generate(): array
     {
+        return $this->generateForSelection();
+    }
+
+    public function generateForSelection(array $selection = []): array
+    {
         $created = 0;
         $warnings = collect();
+        $batches = $this->batchesForSelection($selection);
 
-        DB::transaction(function () use (&$created, $warnings): void {
-            foreach ($this->batches() as $batch) {
+        if ($batches->isEmpty()) {
+            return [
+                'count' => 0,
+                'warnings' => collect(['No batches available for the selected department, semester, or class/division.']),
+            ];
+        }
+
+        DB::transaction(function () use (&$created, $warnings, $batches): void {
+            foreach ($batches as $batch) {
                 $subjects = Subject::query()
                     ->with('faculty')
                     ->where('department_id', $batch['department_id'])
@@ -122,7 +151,7 @@ class FacultyAllocationService
                     ->get();
 
                 if ($subjects->isEmpty()) {
-                    $warnings->push("No subjects found for {$batch['class_name']}.");
+                    $warnings->push("No subjects available for {$batch['class_name']}.");
 
                     continue;
                 }
@@ -139,12 +168,14 @@ class FacultyAllocationService
                         ? Classroom::find($allocation->classroom_id)
                         : $this->roomFor($subject);
 
-                    if (! $subject->faculty_id) {
-                        $warnings->push("Faculty is not assigned to {$subject->name} for {$batch['class_name']}.");
+                    $faculty = $subject->faculty ?? $this->findFacultyForSubject($subject, $batch);
+
+                    if (! $faculty) {
+                        $warnings->push("No available faculty found for {$subject->name} in {$batch['class_name']}.");
                     }
 
-                    if ($subject->faculty_id && FacultyWorkload::query()
-                        ->where('faculty_id', (string) $subject->faculty_id)
+                    if ($faculty && FacultyWorkload::query()
+                        ->where('faculty_id', (string) $faculty->id)
                         ->get()
                         ->contains(fn (FacultyWorkload $workload): bool => $workload->workload_status === 'Overloaded')) {
                         $warnings->push("Faculty workload is overloaded for {$subject->name} in {$batch['class_name']}.");
@@ -155,7 +186,7 @@ class FacultyAllocationService
                     }
 
                     $allocation->fill([
-                        'faculty_id' => $subject->faculty_id,
+                        'faculty_id' => $faculty?->id,
                         'classroom_id' => $room?->id,
                         'status' => $room ? 'Allocated' : 'Unallocated',
                         'notes' => $room?->room_number,
@@ -172,6 +203,35 @@ class FacultyAllocationService
         ];
     }
 
+    public function batchesForSelection(array $selection = []): Collection
+    {
+        $batches = $this->batches();
+
+        if (! empty($selection['department_id'])) {
+            $batches = $batches->filter(fn (array $batch): bool => (int) $batch['department_id'] === (int) $selection['department_id']);
+        }
+
+        if (! empty($selection['semester'])) {
+            $batches = $batches->filter(fn (array $batch): bool => (string) $batch['semester'] === (string) $selection['semester']);
+        }
+
+        if (! empty($selection['division'])) {
+            $batches = $batches->filter(function (array $batch) use ($selection): bool {
+                if (! empty($batch['name']) && (string) $batch['name'] === (string) $selection['division']) {
+                    return true;
+                }
+
+                return str_contains((string) $batch['class_name'], (string) $selection['division']);
+            });
+        }
+
+        if (! empty($selection['batch'])) {
+            $batches = $batches->filter(fn (array $batch): bool => (string) $batch['key'] === (string) $selection['batch']);
+        }
+
+        return $batches->values();
+    }
+
     private function roomFor(Subject $subject): ?Classroom
     {
         $isLab = str_contains(strtolower((string) $subject->subject_type), 'lab')
@@ -184,6 +244,22 @@ class FacultyAllocationService
             ->whereNotNull('room_number')
             ->orderBy('room_number')
             ->first();
+    }
+
+    private function findFacultyForSubject(Subject $subject, array $batch): ?\App\Models\Faculty
+    {
+        if ($subject->faculty_id) {
+            return $subject->faculty;
+        }
+
+        $department = Department::find($batch['department_id']);
+        $query = \App\Models\Faculty::query();
+
+        if ($department) {
+            $query->where('department_id', $department->id);
+        }
+
+        return $query->orderBy('name')->first();
     }
 
     private function makeBatch(Department $department, string $semester, ?string $name = null, ?int $divisionId = null): array

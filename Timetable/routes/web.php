@@ -1083,25 +1083,87 @@ Route::get('/admin/faculty-allocation', function (Request $request, FacultyAlloc
         return redirect('/admin/login');
     }
 
-    $batches = $service->batches();
-    $selectedBatch = $batches->firstWhere('key', $request->input('batch'));
-    $allocations = $service->allocations($selectedBatch, $request->only([
-        'department_id',
-        'semester',
-        'subject_id',
-        'faculty_id',
-        'classroom_id',
-        'subject_type',
-    ]));
+    $departmentId = $request->input('department_id');
+    $semester = $request->input('semester');
+    $division = $request->input('division');
+
+    $allBatches = $service->batches();
+    $batches = $allBatches->filter(function (array $batch) use ($departmentId, $semester, $division): bool {
+        if (filled($departmentId) && (int) $batch['department_id'] !== (int) $departmentId) {
+            return false;
+        }
+
+        if (filled($semester) && (string) $batch['semester'] !== (string) $semester) {
+            return false;
+        }
+
+        if (filled($division) && ! str_contains((string) $batch['class_name'], (string) $division)) {
+            return false;
+        }
+
+        return true;
+    })->values();
+
+    $selectedBatch = $batches->firstWhere('key', $request->input('batch')) ?? $batches->first();
+    $selectedBatchKey = $selectedBatch['key'] ?? null;
+
+    $departmentRows = Department::orderBy('name')->get();
+    $semesterQuery = Subject::query()->when(filled($departmentId), fn ($query) => $query->where('department_id', $departmentId));
+    $semesterOptions = $semesterQuery->distinct()->orderBy('semester')->pluck('semester')->filter()->values();
+
+    $divisionOptions = collect();
+    if (filled($departmentId) && filled($semester)) {
+        $departmentName = Department::find($departmentId)?->name;
+
+        if (filled($departmentName)) {
+            $divisionOptions = User::query()
+                ->where('department', $departmentName)
+                ->where('semester', $semester)
+                ->whereNotNull('divcon')
+                ->where('divcon', '!=', '')
+                ->select('divcon')
+                ->distinct()
+                ->orderBy('divcon')
+                ->pluck('divcon');
+        }
+
+        if ($divisionOptions->isEmpty()) {
+            $divisionOptions = Division::query()
+                ->whereHas('subjects', fn ($query) => $query->where('department_id', $departmentId)->where('semester', $semester))
+                ->orderBy('name')
+                ->pluck('name');
+        }
+
+        if ($divisionOptions->isEmpty()) {
+            $divisionOptions = collect(['A', 'B', 'C']);
+        }
+    }
+
+    $allocations = collect();
+    if ($selectedBatch) {
+        $allocations = $service->allocations($selectedBatch, [
+            'department_id' => $selectedBatch['department_id'],
+            'semester' => $selectedBatch['semester'],
+            'subject_id' => $request->input('subject_id'),
+            'faculty_id' => $request->input('faculty_id'),
+            'classroom_id' => $request->input('classroom_id'),
+            'subject_type' => $request->input('subject_type'),
+        ]);
+    }
 
     return view('admin.faculty-allocation', [
         'batches' => $batches,
         'selectedBatch' => $selectedBatch,
+        'selectedBatchKey' => $selectedBatchKey,
         'allocations' => $allocations,
-        'departments' => Department::orderBy('name')->get(),
-        'subjects' => Subject::orderBy('name')->get(['id', 'name']),
-        'faculties' => Faculty::orderBy('name')->get(['id', 'name']),
-        'classrooms' => Classroom::orderBy('room_number')->get(['id', 'room_number']),
+        'departments' => $departmentRows,
+        'semesterOptions' => $semesterOptions,
+        'divisionOptions' => $divisionOptions,
+        'selectedDepartmentId' => $departmentId,
+        'selectedSemester' => $semester,
+        'selectedDivision' => $division,
+        'subjects' => Subject::query()->when(filled($departmentId), fn ($query) => $query->where('department_id', $departmentId))->when(filled($semester), fn ($query) => $query->where('semester', $semester))->orderBy('name')->get(['id', 'name', 'subject_type', 'lecture_credit', 'lab_credit', 'tutorial_credit', 'semester', 'department_id', 'faculty_id']),
+        'faculties' => Faculty::orderBy('name')->get(['id', 'name', 'department_id']),
         'subjectTypes' => Subject::query()->whereNotNull('subject_type')->distinct()->orderBy('subject_type')->pluck('subject_type'),
     ]);
 });
@@ -1111,13 +1173,22 @@ Route::post('/admin/faculty-allocation/generate', function (Request $request, Fa
         return redirect('/admin/login');
     }
 
-    $result = $service->generate();
+    $selection = [
+        'department_id' => $request->input('department_id'),
+        'semester' => $request->input('semester'),
+        'division' => $request->input('division'),
+        'batch' => $request->input('batch'),
+    ];
+
+    $result = $service->generateForSelection($selection);
 
     if ($request->expectsJson()) {
         return response()->json($result);
     }
 
-    return redirect('/admin/faculty-allocation')
+    $query = http_build_query(array_filter($selection, fn ($value) => $value !== null && $value !== ''));
+
+    return redirect('/admin/faculty-allocation'.($query !== '' ? '?'.$query : ''))
         ->with('faculty_allocation_status', "Generated {$result['count']} faculty allocation records.")
         ->with('faculty_allocation_warnings', $result['warnings']->all());
 });
