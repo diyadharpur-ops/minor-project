@@ -62,27 +62,23 @@ class FacultyAllocationService
             ->get()
             ->each(function (Subject $subject) use ($batches): void {
                 $department = Department::find($subject->department_id);
-                if ($department && ! $batches->contains(fn (array $batch): bool => $batch['department_id'] === $department->id && $batch['semester'] === $subject->semester
-                )) {
+
+                if (! $department) {
+                    return;
+                }
+
+                $hasBatchForSemester = $batches->contains(fn (array $batch): bool => $batch['department_id'] === $department->id
+                    && $batch['semester'] === $subject->semester
+                );
+
+                if (! $hasBatchForSemester) {
                     $batches->push($this->makeBatch($department, $subject->semester));
                 }
-            });
 
-        if ($batches->isEmpty()) {
-            Department::query()->orderBy('name')->get()->each(function (Department $department) use ($batches): void {
-                Subject::query()
-                    ->where('department_id', $department->id)
-                    ->select('semester')
-                    ->distinct()
-                    ->pluck('semester')
-                    ->filter()
-                    ->each(function ($semester) use ($department, $batches): void {
-                        foreach (['A', 'B', 'C'] as $division) {
-                            $batches->push($this->makeBatch($department, (string) $semester, $division));
-                        }
-                    });
+                foreach (['A', 'B', 'C'] as $division) {
+                    $batches->push($this->makeBatch($department, $subject->semester, $division));
+                }
             });
-        }
 
         return $batches
             ->unique(fn (array $batch): string => $batch['key'])

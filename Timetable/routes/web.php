@@ -1108,34 +1108,61 @@ Route::get('/admin/faculty-allocation', function (Request $request, FacultyAlloc
     $selectedBatchKey = $selectedBatch['key'] ?? null;
 
     $departmentRows = Department::orderBy('name')->get();
-    $semesterQuery = Subject::query()->when(filled($departmentId), fn ($query) => $query->where('department_id', $departmentId));
-    $semesterOptions = $semesterQuery->distinct()->orderBy('semester')->pluck('semester')->filter()->values();
+
+    $semesterOptions = $allBatches
+        ->when(filled($departmentId), fn ($collection) => $collection->filter(fn (array $batch): bool => (int) $batch['department_id'] === (int) $departmentId))
+        ->pluck('semester')
+        ->filter(fn ($value) => filled($value))
+        ->unique()
+        ->sortBy(fn ($value) => (int) $value)
+        ->values();
+
+    if ($semesterOptions->isEmpty()) {
+        $semesterOptions = Subject::query()
+            ->when(filled($departmentId), fn ($query) => $query->where('department_id', $departmentId))
+            ->distinct()
+            ->orderBy('semester')
+            ->pluck('semester')
+            ->filter()
+            ->values();
+    }
 
     $divisionOptions = collect();
     if (filled($departmentId) && filled($semester)) {
-        $departmentName = Department::find($departmentId)?->name;
+        $batchDivisionOptions = $allBatches
+            ->filter(fn (array $batch): bool => (int) $batch['department_id'] === (int) $departmentId && (string) $batch['semester'] === (string) $semester)
+            ->pluck('name')
+            ->filter(fn ($name) => filled($name) && (string) $name !== (string) $semester)
+            ->unique()
+            ->values();
 
-        if (filled($departmentName)) {
-            $divisionOptions = User::query()
-                ->where('department', $departmentName)
-                ->where('semester', $semester)
-                ->whereNotNull('divcon')
-                ->where('divcon', '!=', '')
-                ->select('divcon')
-                ->distinct()
-                ->orderBy('divcon')
-                ->pluck('divcon');
-        }
+        if ($batchDivisionOptions->isNotEmpty()) {
+            $divisionOptions = $batchDivisionOptions;
+        } else {
+            $departmentName = Department::find($departmentId)?->name;
 
-        if ($divisionOptions->isEmpty()) {
-            $divisionOptions = Division::query()
-                ->whereHas('subjects', fn ($query) => $query->where('department_id', $departmentId)->where('semester', $semester))
-                ->orderBy('name')
-                ->pluck('name');
-        }
+            if (filled($departmentName)) {
+                $divisionOptions = User::query()
+                    ->where('department', $departmentName)
+                    ->where('semester', $semester)
+                    ->whereNotNull('divcon')
+                    ->where('divcon', '!=', '')
+                    ->select('divcon')
+                    ->distinct()
+                    ->orderBy('divcon')
+                    ->pluck('divcon');
+            }
 
-        if ($divisionOptions->isEmpty()) {
-            $divisionOptions = collect(['A', 'B', 'C']);
+            if ($divisionOptions->isEmpty()) {
+                $divisionOptions = Division::query()
+                    ->whereHas('subjects', fn ($query) => $query->where('department_id', $departmentId)->where('semester', $semester))
+                    ->orderBy('name')
+                    ->pluck('name');
+            }
+
+            if ($divisionOptions->isEmpty()) {
+                $divisionOptions = collect(['A', 'B', 'C']);
+            }
         }
     }
 

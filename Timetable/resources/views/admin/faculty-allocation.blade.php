@@ -116,19 +116,19 @@
                             @endforeach
                         </select>
                     </div>
-
-                    <div class="generate-wrap">
-                        <form method="POST" action="{{ url('/admin/faculty-allocation/generate') }}" style="display:inline;">
-                            @csrf
-                            <input type="hidden" name="department_id" value="{{ $selectedDepartmentId }}">
-                            <input type="hidden" name="semester" value="{{ $selectedSemester }}">
-                            <input type="hidden" name="division" value="{{ $selectedDivision }}">
-                            <input type="hidden" name="batch" value="{{ $selectedBatchKey }}">
-                            <button type="submit" class="btn-primary">⚙ Auto Generate Faculty Allocation</button>
-                        </form>
-                    </div>
                 </div>
             </form>
+
+            <div class="generate-wrap" style="margin-top: 16px;">
+                <form method="POST" action="{{ url('/admin/faculty-allocation/generate') }}" style="display:inline;">
+                    @csrf
+                    <input type="hidden" name="department_id" value="{{ $selectedDepartmentId }}">
+                    <input type="hidden" name="semester" value="{{ $selectedSemester }}">
+                    <input type="hidden" name="division" value="{{ $selectedDivision }}">
+                    <input type="hidden" name="batch" value="{{ $selectedBatchKey }}">
+                    <button type="submit" class="btn-primary">⚙ Auto Generate Faculty Allocation</button>
+                </form>
+            </div>
         </div>
 
         <div class="faculty-card details-card">
@@ -146,6 +146,9 @@
                                 <th>Sr. No.</th>
                                 <th>Subject</th>
                                 <th>Subject Type</th>
+                                <th>Lecture Hours</th>
+                                <th>Lab Hours</th>
+                                <th>Tutorial Hours</th>
                                 <th>Faculty</th>
                                 <th>Batch</th>
                                 <th>Weekly Hours</th>
@@ -157,6 +160,9 @@
                                 @php
                                     $subject = $allocation->subject;
                                     $subjectType = $subject?->subject_type ?? 'Theory';
+                                    $lectureHours = (int) ($subject?->lecture_credit ?? 0);
+                                    $labHours = (int) ($subject?->lab_credit ?? 0);
+                                    $tutorialHours = (int) ($subject?->tutorial_credit ?? 0);
                                     $allocationType = str_contains(strtolower((string) $subjectType), 'lab') || str_contains(strtolower((string) $subjectType), 'practical') ? 'Lab' : (str_contains(strtolower((string) $subjectType), 'tutorial') ? 'Tutorial' : 'Lecture');
                                     $weeklyHours = (int) optional($subject)->weekly_hours ?? 0;
                                 @endphp
@@ -164,6 +170,9 @@
                                     <td>{{ $index + 1 }}</td>
                                     <td>{{ $subject?->name ?? '—' }}</td>
                                     <td>{{ $subjectType }}</td>
+                                    <td>{{ $lectureHours }}</td>
+                                    <td>{{ $labHours }}</td>
+                                    <td>{{ $tutorialHours }}</td>
                                     <td>{{ $allocation->faculty?->name ?? ($subject?->faculty?->name ?? '—') }}</td>
                                     <td>{{ $allocation->class_name ?: ($selectedBatch['class_name'] ?? '—') }}</td>
                                     <td>{{ $weeklyHours }}</td>
