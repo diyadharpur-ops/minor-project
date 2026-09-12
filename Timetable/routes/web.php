@@ -18,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -605,6 +606,7 @@ Route::get('/admin/faculty-workload', function (Request $request) {
     $search = trim((string) $request->input('q', ''));
     $departmentFilter = trim((string) $request->input('department', ''));
     $statusFilter = trim((string) $request->input('status', ''));
+    $selectedDepartmentId = $request->input('department_id');
 
     if ($search !== '') {
         $query->where(function ($q) use ($search) {
@@ -623,20 +625,164 @@ Route::get('/admin/faculty-workload', function (Request $request) {
 
     $workloads = $query->orderByDesc('created_at')->get();
 
-    $departments = FacultyWorkload::query()
-        ->whereNotNull('department')
-        ->where('department', '!=', '')
-        ->distinct()
-        ->orderBy('department')
-        ->pluck('department');
+    $departments = Department::query()
+        ->orderBy('name')
+        ->get();
+
+    $generatedWorkloads = collect();
+    $facultyTotals = collect();
+    $summary = [
+        'total_faculty' => 0,
+        'total_allocated_subjects' => 0,
+        'total_lecture_hours' => 0,
+        'total_tutorial_hours' => 0,
+        'total_lab_hours' => 0,
+        'total_weekly_workload' => 0,
+    ];
+
+    if (Schema::hasColumn('faculty_workloads', 'subject_name') && Schema::hasColumn('faculty_workloads', 'department_id')) {
+        $generatedWorkloads = FacultyWorkload::query()
+            ->when(filled($selectedDepartmentId), fn ($query) => $query->where('department_id', $selectedDepartmentId))
+            ->whereNotNull('subject_name')
+            ->orderBy('faculty_name')
+            ->orderBy('semester')
+            ->get();
+
+        $facultyCount = $generatedWorkloads->pluck('faculty_id')->filter()->unique()->count();
+        $totalWeeklyHours = (float) $generatedWorkloads->sum('weekly_workload');
+        $sharedFacultyWorkload = $facultyCount > 0 ? ($totalWeeklyHours / $facultyCount) : 0;
+
+        $generatedWorkloads = $generatedWorkloads->map(function ($record) use ($sharedFacultyWorkload) {
+            $record->weekly_workload = (float) $sharedFacultyWorkload;
+            $record->weekly_hours = (float) $sharedFacultyWorkload;
+            $record->total_hours = (float) $sharedFacultyWorkload;
+
+            return $record;
+        });
+
+        $facultyTotals = $generatedWorkloads
+            ->groupBy('faculty_id')
+            ->map(fn () => (float) $sharedFacultyWorkload)
+            ->sortKeys();
+
+        $summary = [
+            'total_faculty' => $facultyCount,
+            'total_allocated_subjects' => $generatedWorkloads->count(),
+            'total_lecture_hours' => $generatedWorkloads->sum('lecture_hours'),
+            'total_tutorial_hours' => $generatedWorkloads->sum('tutorial_hours'),
+            'total_lab_hours' => $generatedWorkloads->sum('lab_hours'),
+            'total_weekly_workload' => (float) $sharedFacultyWorkload,
+        ];
+    }
 
     return view('admin.faculty-workload.index', [
         'workloads' => $workloads,
         'departments' => $departments,
+        'departmentOptions' => $departments,
+        'generatedWorkloads' => $generatedWorkloads,
+        'facultyTotals' => $facultyTotals,
+        'summary' => $summary,
         'q' => $search,
         'departmentFilter' => $departmentFilter,
         'statusFilter' => $statusFilter,
+        'selectedDepartmentId' => $selectedDepartmentId,
     ]);
+});
+
+Route::post('/admin/faculty-workload/generate', function (Request $request) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $departmentId = $request->input('department_id');
+    $regenerate = $request->boolean('regenerate');
+
+    if (! filled($departmentId)) {
+        return back()->with('error', 'Please select a department first.');
+    }
+
+    $department = Department::find($departmentId);
+
+    if (! $department) {
+        return back()->with('error', 'Please select a valid department.');
+    }
+
+    if (! Schema::hasColumn('faculty_workloads', 'department_id') || ! Schema::hasColumn('faculty_workloads', 'subject_name')) {
+        return back()->with('error', 'Faculty workload database structure is not ready. Please run the pending migration first.');
+    }
+
+    $existingRecords = FacultyWorkload::query()
+        ->where('department_id', $department->id)
+        ->whereNotNull('subject_name')
+        ->exists();
+
+    if ($existingRecords && ! $regenerate) {
+        return back()
+            ->with('warning', 'Workload already exists for this department. Do you want to regenerate it?')
+            ->with('department_warning_id', $department->id)
+            ->withInput();
+    }
+
+    if ($existingRecords && $regenerate) {
+        FacultyWorkload::query()
+            ->where('department_id', $department->id)
+            ->whereNotNull('subject_name')
+            ->delete();
+    }
+
+    $allocations = RoomAllocation::query()
+        ->with(['faculty', 'subject'])
+        ->where('department_id', $department->id)
+        ->orderBy('semester')
+        ->orderBy('subject_id')
+        ->get();
+
+    if ($allocations->isEmpty()) {
+        return back()->with('error', 'No faculty allocation found for the selected department.');
+    }
+
+    foreach ($allocations as $allocation) {
+        $faculty = $allocation->faculty;
+        $subject = $allocation->subject;
+
+        if (! $faculty || ! $subject) {
+            continue;
+        }
+
+        $lectureHours = (int) ($subject->lecture_credit ?? 0);
+        $tutorialHours = (int) ($subject->tutorial_credit ?? 0);
+        $labHours = (int) ($subject->lab_credit ?? 0);
+        $weeklyHours = $lectureHours + $tutorialHours + ($labHours * 2);
+
+        FacultyWorkload::query()->updateOrCreate([
+            'faculty_id' => (string) $faculty->id,
+            'department_id' => $department->id,
+            'semester' => (string) $allocation->semester,
+            'subject_name' => $subject->name,
+            'subject_code' => $subject->subject_code,
+        ], [
+            'faculty_name' => $faculty->name,
+            'faculty_id' => (string) $faculty->id,
+            'department' => $department->name,
+            'department_id' => $department->id,
+            'semester' => (string) $allocation->semester,
+            'subject_name' => $subject->name,
+            'subject_code' => $subject->subject_code,
+            'lecture_hours' => $lectureHours,
+            'tutorial_hours' => $tutorialHours,
+            'lab_hours' => $labHours,
+            'weekly_hours' => $weeklyHours,
+            'weekly_workload' => $weeklyHours,
+            'total_hours' => $weeklyHours,
+            'workload_status' => FacultyWorkload::calculateStatus($weeklyHours),
+            'subjects_assigned' => $subject->name,
+            'theory_hours' => $lectureHours + $tutorialHours,
+            'practical_hours' => $labHours,
+        ]);
+    }
+
+    return redirect('/admin/faculty-workload?department_id='.$department->id)
+        ->with('success', 'Faculty workload generated successfully.');
 });
 
 Route::get('/admin/faculty-workload/create', function () {
