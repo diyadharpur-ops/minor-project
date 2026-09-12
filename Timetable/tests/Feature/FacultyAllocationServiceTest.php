@@ -7,8 +7,9 @@ use App\Models\RoomAllocation;
 use App\Models\Subject;
 use App\Models\User;
 use App\Services\FacultyAllocationService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 test('faculty allocation service uses real project data and subject metadata', function () {
     $department = Department::create([
@@ -56,7 +57,7 @@ test('faculty allocation service uses real project data and subject metadata', f
         'workload_status' => 'Normal',
     ]);
 
-    $service = new FacultyAllocationService();
+    $service = new FacultyAllocationService;
     $batches = $service->batches();
 
     expect($batches)->toHaveCount(3)
@@ -112,7 +113,7 @@ test('faculty allocation service balances workload across faculty for the same s
         ]);
     }
 
-    $service = new FacultyAllocationService();
+    $service = new FacultyAllocationService;
     $selection = ['department_id' => $department->id, 'semester' => '5', 'batch' => $department->id.'|5|A'];
     $result = $service->generateForSelection($selection);
 
@@ -167,7 +168,7 @@ test('admin faculty allocation page derives semester and division options from a
         'divcon' => 'A',
     ]);
 
-    \App\Models\RoomAllocation::create([
+    RoomAllocation::create([
         'department_id' => $department->id,
         'semester' => '5',
         'subject_id' => $subject->id,
@@ -193,6 +194,23 @@ test('admin faculty allocation page derives semester and division options from a
     $response->assertSee('Lecture');
     $response->assertSee('Lab');
     $response->assertSee('Tutorial');
+    $response->assertSeeInOrder([
+        'Operating Systems',
+        'Theory',
+        'Dr. R. Sharma',
+        '3 Hours',
+        'Lecture',
+        'Operating Systems',
+        'Theory',
+        'Dr. R. Sharma',
+        '2 Hours',
+        'Lab',
+        'Operating Systems',
+        'Theory',
+        'Dr. R. Sharma',
+        '1 Hour',
+        'Tutorial',
+    ]);
 });
 
 test('faculty allocation service creates class batches for subject-only data when division is selected', function () {
@@ -220,7 +238,7 @@ test('faculty allocation service creates class batches for subject-only data whe
         'tutorial_credit' => 1,
     ]);
 
-    $service = new FacultyAllocationService();
+    $service = new FacultyAllocationService;
     $batches = $service->batches();
 
     expect($batches->pluck('name')->filter()->unique()->values()->sort()->values()->all())->toBe(['5', 'A', 'B', 'C'])
@@ -266,7 +284,7 @@ test('admin faculty allocation page renders selected batch allocations without a
         'divcon' => 'A',
     ]);
 
-    \App\Models\RoomAllocation::create([
+    RoomAllocation::create([
         'department_id' => $department->id,
         'semester' => '5',
         'subject_id' => $subject->id,

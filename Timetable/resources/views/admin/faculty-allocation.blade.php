@@ -143,41 +143,34 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Sr. No.</th>
                                 <th>Subject</th>
                                 <th>Subject Type</th>
-                                <th>Lecture Hours</th>
-                                <th>Lab Hours</th>
-                                <th>Tutorial Hours</th>
                                 <th>Faculty</th>
-                                <th>Batch</th>
                                 <th>Weekly Hours</th>
                                 <th>Allocation Type</th>
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach ($allocations as $index => $allocation)
+                            @foreach ($allocations as $allocation)
                                 @php
                                     $subject = $allocation->subject;
                                     $subjectType = $subject?->subject_type ?? 'Theory';
-                                    $lectureHours = (int) ($subject?->lecture_credit ?? 0);
-                                    $labHours = (int) ($subject?->lab_credit ?? 0);
-                                    $tutorialHours = (int) ($subject?->tutorial_credit ?? 0);
-                                    $allocationType = str_contains(strtolower((string) $subjectType), 'lab') || str_contains(strtolower((string) $subjectType), 'practical') ? 'Lab' : (str_contains(strtolower((string) $subjectType), 'tutorial') ? 'Tutorial' : 'Lecture');
-                                    $weeklyHours = (int) optional($subject)->weekly_hours ?? 0;
+                                    $facultyName = $allocation->faculty?->name ?? ($subject?->faculty?->name ?? '—');
+                                    $allocationRows = collect([
+                                        ['type' => 'Lecture', 'hours' => (int) ($subject?->lecture_credit ?? 0)],
+                                        ['type' => 'Lab', 'hours' => (int) ($subject?->lab_credit ?? 0) * 2],
+                                        ['type' => 'Tutorial', 'hours' => (int) ($subject?->tutorial_credit ?? 0)],
+                                    ])->filter(fn (array $row): bool => $row['hours'] > 0);
                                 @endphp
-                                <tr>
-                                    <td>{{ $index + 1 }}</td>
-                                    <td>{{ $subject?->name ?? '—' }}</td>
-                                    <td>{{ $subjectType }}</td>
-                                    <td>{{ $lectureHours }}</td>
-                                    <td>{{ $labHours }}</td>
-                                    <td>{{ $tutorialHours }}</td>
-                                    <td>{{ $allocation->faculty?->name ?? ($subject?->faculty?->name ?? '—') }}</td>
-                                    <td>{{ $allocation->class_name ?: ($selectedBatch['class_name'] ?? '—') }}</td>
-                                    <td>{{ $weeklyHours }}</td>
-                                    <td>{{ $allocationType }}</td>
-                                </tr>
+                                @foreach ($allocationRows as $allocationRow)
+                                    <tr>
+                                        <td>{{ $subject?->name ?? '—' }}</td>
+                                        <td>{{ $subjectType }}</td>
+                                        <td>{{ $facultyName }}</td>
+                                        <td>{{ $allocationRow['hours'] }} {{ $allocationRow['hours'] === 1 ? 'Hour' : 'Hours' }}</td>
+                                        <td>{{ $allocationRow['type'] }}</td>
+                                    </tr>
+                                @endforeach
                             @endforeach
                         </tbody>
                     </table>
