@@ -1393,6 +1393,33 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     }
 
     $departments = Department::orderBy('name')->get();
+    $semesters = Subject::query()
+        ->whereNotNull('semester')
+        ->select('semester')
+        ->distinct()
+        ->orderBy('semester')
+        ->pluck('semester');
+    $divisions = User::query()
+        ->whereNotNull('divcon')
+        ->where('divcon', '!=', '')
+        ->select('divcon')
+        ->distinct()
+        ->orderBy('divcon')
+        ->pluck('divcon');
+    $academicYears = TimetableEntry::query()
+        ->whereNotNull('academic_year')
+        ->where('academic_year', '!=', '')
+        ->select('academic_year')
+        ->distinct()
+        ->orderByDesc('academic_year')
+        ->pluck('academic_year');
+    $terms = TimetableEntry::query()
+        ->whereNotNull('term')
+        ->where('term', '!=', '')
+        ->select('term')
+        ->distinct()
+        ->orderBy('term')
+        ->pluck('term');
 
     // Build allocations query — filter by dept/semester/division when query params are present
     $allocQuery = RoomAllocation::with(['department', 'subject', 'classroom'])
@@ -1490,12 +1517,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
                 ->filter(fn ($room) => filled($room->room_number))
                 ->values();
 
-            // Fallback: if no specific classroom type, use first available room
-            $defaultClassroom = $classroomRooms->first() ?? $classrooms->first();
-
-            if ($availableLabs->count() < 2 && $subjects->contains(fn ($s) => $normalizeSubjectType($s->subject_type) === 'Lab')) {
-                return back()->withErrors(['auto' => 'At least two available lab rooms are required for Lab subjects.'])->withInput();
-            }
+            $defaultClassroom = $classroomRooms->first();
 
             if (! $defaultClassroom && $subjects->contains(fn ($s) => $normalizeSubjectType($s->subject_type) === 'Classroom')) {
                 return back()->withErrors(['auto' => 'No available classroom room found for Classroom subjects.'])->withInput();
@@ -1528,12 +1550,23 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
                     $isLab = $normalizeSubjectType($subject->subject_type) === 'Lab';
 
                     if ($isLab) {
-                        $selectedRooms = $availableLabs->take(2);
+                        $selectedRooms = collect();
+                        $capacity = 0;
+
+                        foreach ($availableLabs as $lab) {
+                            $selectedRooms->push($lab);
+                            $capacity += (int) $lab->room_capacity;
+
+                            if ($capacity >= $capacityToUse) {
+                                break;
+                            }
+                        }
+
                         $roomNumbers = $selectedRooms->pluck('room_number')->filter()->values();
                         $firstRoom = $selectedRooms->first();
 
-                        if ($selectedRooms->count() < 2 || $roomNumbers->unique()->count() < 2) {
-                            throw new RuntimeException('Two suitable different lab rooms are unavailable for '.$subject->name.'.');
+                        if (! $firstRoom || $capacity < $capacityToUse || $roomNumbers->unique()->count() !== $selectedRooms->count()) {
+                            throw new RuntimeException('Suitable lab capacity is unavailable for '.$subject->name.'.');
                         }
 
                         $notes = $roomNumbers->implode(' + ');
@@ -1618,15 +1651,12 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
                 ->filter(fn ($room) => (int) $room->room_capacity > 0)
                 ->filter(fn ($room) => filled($room->room_number))
                 ->values();
-            $availableLabNumbers = $availableLabs->pluck('room_number')->unique()->values();
-            $classroomF111 = $classrooms->first(fn ($room) => $room->room_number === 'F111');
+            $classroomRooms = $classrooms->filter(fn ($room) => $normalizeRoomType($room->room_type) === 'Classroom')
+                ->filter(fn ($room) => filled($room->room_number))
+                ->values();
 
-            if ($availableLabNumbers->count() < 2) {
-                return back()->withErrors(['auto' => 'Two suitable available lab rooms are required for every Lab subject.']);
-            }
-
-            if (! $classroomF111) {
-                return back()->withErrors(['auto' => 'Available classroom F111 is required for every Classroom subject.']);
+            if ($classroomRooms->isEmpty() && $subjects->contains(fn ($subject) => $normalizeSubjectType($subject->subject_type) === 'Classroom')) {
+                return back()->withErrors(['auto' => 'No available classroom room found for Classroom subjects.']);
             }
 
             $baseClasses = $subjects
@@ -1675,7 +1705,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
 
             $countAllocatedClassrooms = 0;
             $countAllocatedLabs = 0;
-            DB::transaction(function () use ($allocationGroups, $normalizeSubjectType, $availableLabs, $classroomF111, &$countAllocatedClassrooms, &$countAllocatedLabs) {
+            DB::transaction(function () use ($allocationGroups, $normalizeSubjectType, $availableLabs, $classroomRooms, &$countAllocatedClassrooms, &$countAllocatedLabs) {
                 RoomAllocation::query()->delete();
 
                 foreach ($allocationGroups as $group) {
@@ -1695,14 +1725,30 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
 
                     foreach ($groupSubjects as $subject) {
                         $isLab = $normalizeSubjectType($subject->subject_type) === 'Lab';
-                        $selectedRooms = $isLab ? $availableLabs->take(2) : collect([$classroomF111]);
-                        $roomNumbers = $selectedRooms->pluck('room_number')->filter()->values();
+                        $selectedRooms = collect();
 
-                        if ($isLab && ($selectedRooms->count() !== 2 || $roomNumbers->unique()->count() !== 2)) {
-                            throw new RuntimeException('Two suitable different lab rooms are unavailable for '.$subject->name.'.');
+                        if ($isLab) {
+                            $capacity = 0;
+
+                            foreach ($availableLabs as $lab) {
+                                $selectedRooms->push($lab);
+                                $capacity += (int) $lab->room_capacity;
+
+                                if ($capacity >= $capacityToUse) {
+                                    break;
+                                }
+                            }
+                        } else {
+                            $selectedRooms = $classroomRooms->take(1);
                         }
 
-                        if ($roomNumbers->count() !== $selectedRooms->count() || $roomNumbers->contains('')) {
+                        $roomNumbers = $selectedRooms->pluck('room_number')->filter()->values();
+
+                        if ($isLab && ($selectedRooms->isEmpty() || $roomNumbers->unique()->count() !== $selectedRooms->count() || $selectedRooms->sum('room_capacity') < $capacityToUse)) {
+                            throw new RuntimeException('Suitable lab capacity is unavailable for '.$subject->name.'.');
+                        }
+
+                        if ($selectedRooms->isEmpty() || $roomNumbers->count() !== $selectedRooms->count() || $roomNumbers->contains('')) {
                             throw new RuntimeException('A valid room is unavailable for '.$subject->name.'.');
                         }
 
@@ -1742,6 +1788,10 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
 
     return view('admin.classrooms.allocation', [
         'departments' => $departments,
+        'semesters' => $semesters,
+        'divisions' => $divisions,
+        'academicYears' => $academicYears,
+        'terms' => $terms,
         'allocations' => $allocations,
         'totalLectures' => $totalSubjects,
         'allocatedCount' => $allocatedClassroomCount,

@@ -210,7 +210,7 @@
         <p style="color: #6b7280; font-size: 0.9rem; margin-top: 4px;">Select criteria and auto-allocate classrooms &amp; labs based on subject type.</p>
     </div>
     <div style="text-align: right;">
-        <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;">Academic Year : {{ \App\Models\TimetableEntry::max('academic_year') ?? '2024-25' }}</div>
+        <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;">Academic Year : {{ $academicYears->first() ?? '' }}</div>
     </div>
 </div>
 
@@ -251,7 +251,7 @@
                 <label>Semester</label>
                 <select name="semester" required>
                     <option value="">Select Semester</option>
-                    @foreach (['1','2','3','4','5','6'] as $sem)
+                    @foreach ($semesters as $sem)
                         <option value="{{ $sem }}"
                             {{ old('semester', request('semester')) == $sem ? 'selected' : '' }}>
                             Semester {{ $sem }}
@@ -261,20 +261,33 @@
             </div>
             <div class="filter-group">
                 <label>Division</label>
-                <input type="text" name="division" placeholder="e.g. A"
-                    value="{{ old('division', request('division', 'A')) }}" required>
+                <select name="division" required>
+                    <option value="">Select Division</option>
+                    @foreach ($divisions as $division)
+                        <option value="{{ $division }}"
+                            {{ old('division', request('division')) == $division ? 'selected' : '' }}>
+                            {{ $division }}
+                        </option>
+                    @endforeach
+                </select>
             </div>
             <div class="filter-group">
                 <label>Term</label>
                 <select name="term" required>
-                    <option value="Odd" {{ old('term', request('term', 'Odd')) == 'Odd' ? 'selected' : '' }}>Odd</option>
-                    <option value="Even" {{ old('term', request('term')) == 'Even' ? 'selected' : '' }}>Even</option>
+                    <option value="">Select Term</option>
+                    @foreach ($terms as $term)
+                        <option value="{{ $term }}" {{ old('term', request('term')) == $term ? 'selected' : '' }}>{{ $term }}</option>
+                    @endforeach
                 </select>
             </div>
             <div class="filter-group">
                 <label>Academic Year</label>
-                <input type="text" name="academic_year" placeholder="e.g. 2026-2027"
-                    value="{{ old('academic_year', request('academic_year', date('Y').'-'.(date('Y')+1))) }}" required>
+                <select name="academic_year" required>
+                    <option value="">Select Academic Year</option>
+                    @foreach ($academicYears as $academicYear)
+                        <option value="{{ $academicYear }}" {{ old('academic_year', request('academic_year')) == $academicYear ? 'selected' : '' }}>{{ $academicYear }}</option>
+                    @endforeach
+                </select>
             </div>
             <div>
                 <button type="submit" class="btn-generate" id="filteredGenBtn"
