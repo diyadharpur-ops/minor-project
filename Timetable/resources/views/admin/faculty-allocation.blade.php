@@ -154,7 +154,6 @@
                             @foreach ($allocations as $allocation)
                                 @php
                                     $subject = $allocation->subject;
-                                    $subjectType = $subject?->subject_type ?? 'Theory';
                                     $facultyName = $allocation->faculty?->name ?? ($subject?->faculty?->name ?? '—');
                                     $allocationRows = collect([
                                         ['type' => 'Lecture', 'hours' => (int) ($subject?->lecture_credit ?? 0)],
@@ -165,7 +164,7 @@
                                 @foreach ($allocationRows as $allocationRow)
                                     <tr>
                                         <td>{{ $subject?->name ?? '—' }}</td>
-                                        <td>{{ $subjectType }}</td>
+                                        <td>{{ $allocationRow['type'] }}</td>
                                         <td>{{ $facultyName }}</td>
                                         <td>{{ $allocationRow['hours'] }} {{ $allocationRow['hours'] === 1 ? 'Hour' : 'Hours' }}</td>
                                         <td>{{ $allocationRow['type'] }}</td>
