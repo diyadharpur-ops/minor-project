@@ -58,6 +58,18 @@
                 </select>
             </div>
             <div class="form-row">
+                <label>Subject Type</label>
+                @php
+                    $existingSubjectType = strtolower((string) ($subject->subject_type ?? 'lecture'));
+                    $existingSubjectType = str_contains($existingSubjectType, 'lab') || str_contains($existingSubjectType, 'practical') ? 'Lab' : (str_contains($existingSubjectType, 'tutorial') ? 'Tutorial' : 'Lecture');
+                @endphp
+                <select name="subject_type" required>
+                    <option value="Lecture" {{ old('subject_type', $existingSubjectType) === 'Lecture' ? 'selected' : '' }}>Lecture</option>
+                    <option value="Lab" {{ old('subject_type', $existingSubjectType) === 'Lab' ? 'selected' : '' }}>Lab</option>
+                    <option value="Tutorial" {{ old('subject_type', $existingSubjectType) === 'Tutorial' ? 'selected' : '' }}>Tutorial</option>
+                </select>
+            </div>
+            <div class="form-row">
                 <label>Lecture Weekly Hours</label>
                 <input type="number" name="lecture_credit" min="0" max="10" value="{{ old('lecture_credit', $subject->lecture_credit) }}" required />
             </div>

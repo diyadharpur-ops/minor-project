@@ -68,6 +68,14 @@
                 </select>
             </div>
             <div class="form-row">
+                <label>Subject Type</label>
+                <select name="subject_type" required>
+                    <option value="Lecture" {{ old('subject_type', 'Lecture') === 'Lecture' ? 'selected' : '' }}>Lecture</option>
+                    <option value="Lab" {{ old('subject_type') === 'Lab' ? 'selected' : '' }}>Lab</option>
+                    <option value="Tutorial" {{ old('subject_type') === 'Tutorial' ? 'selected' : '' }}>Tutorial</option>
+                </select>
+            </div>
+            <div class="form-row">
                 <label>Lecture Weekly Hours</label>
                 <input type="number" name="lecture_credit" min="0" max="10" value="{{ old('lecture_credit') }}" required />
             </div>

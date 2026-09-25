@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'start_time',
     'end_time',
     'student_count',
+    'allocation_type',
     'status',
     'notes',
 ])]

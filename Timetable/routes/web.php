@@ -12,6 +12,7 @@ use App\Models\RoomAllocation;
 use App\Models\Subject;
 use App\Models\TimetableEntry;
 use App\Models\User;
+use App\Services\ClassroomAllocationService;
 use App\Services\FacultyAllocationService;
 use App\Services\TimetableGenerator;
 use Illuminate\Http\Request;
@@ -995,6 +996,7 @@ Route::post('/admin/subjects', function (Request $request) {
             Rule::exists('divisions', 'id')->where(fn ($query) => $query->where('semester', $request->input('semester'))),
         ],
         'department_id' => 'required|exists:departments,id',
+        'subject_type' => 'required|in:Lecture,Lab,Tutorial',
         'lecture_credit' => 'required|integer|min:0|max:10',
         'lab_credit' => 'required|integer|min:0|max:10',
         'tutorial_credit' => 'nullable|integer|min:0|max:10',
@@ -1076,6 +1078,7 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
             Rule::exists('divisions', 'id')->where(fn ($query) => $query->where('semester', $request->input('semester'))),
         ],
         'department_id' => 'required|exists:departments,id',
+        'subject_type' => 'required|in:Lecture,Lab,Tutorial',
         'lecture_credit' => 'required|integer|min:0|max:10',
         'lab_credit' => 'required|integer|min:0|max:10',
         'tutorial_credit' => 'nullable|integer|min:0|max:10',
@@ -1387,7 +1390,7 @@ Route::get('/api/faculty-allocations', function (Request $request, FacultyAlloca
     ]);
 });
 
-Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $request) {
+Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $request, ClassroomAllocationService $allocationService) {
     if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
@@ -1405,7 +1408,11 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
         ->select('divcon')
         ->distinct()
         ->orderBy('divcon')
-        ->pluck('divcon');
+        ->pluck('divcon')
+        ->merge(['A', 'B', 'C'])
+        ->unique()
+        ->sort()
+        ->values();
     $academicYears = TimetableEntry::query()
         ->whereNotNull('academic_year')
         ->where('academic_year', '!=', '')
@@ -1438,21 +1445,69 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     $allocations = $allocQuery->paginate(10)->withQueryString();
 
     $totalSubjects = RoomAllocation::count();
-    $allocatedClassroomCount = RoomAllocation::where('status', 'Allocated')
-        ->whereHas('subject', function ($query) {
-            $query->where('subject_type', 'not like', '%lab%')
-                ->where('subject_type', 'not like', '%practical%');
-        })->count();
-    $allocatedLabCount = RoomAllocation::where('status', 'Allocated')
-        ->whereHas('subject', function ($query) {
-            $query->where('subject_type', 'like', '%lab%')
-                ->orWhere('subject_type', 'like', '%practical%');
-        })->count();
+    $allocatedRooms = RoomAllocation::query()
+        ->where('status', 'Allocated')
+        ->with('subject')
+        ->get();
+    $allocationType = function (RoomAllocation $allocation): string {
+        if (filled($allocation->allocation_type)) {
+            return $allocation->allocation_type;
+        }
+
+        $subjectType = strtolower((string) $allocation->subject?->subject_type);
+
+        return str_contains($subjectType, 'lab') || str_contains($subjectType, 'practical') ? 'Lab' : 'Classroom';
+    };
+    $roomCount = fn (RoomAllocation $allocation): int => count(array_filter(preg_split('/\s*(?:,|\+)\s*/', trim((string) $allocation->notes)) ?: []));
+    $allocatedClassroomCount = $allocatedRooms
+        ->filter(fn (RoomAllocation $allocation): bool => $allocationType($allocation) === 'Classroom')
+        ->sum($roomCount);
+    $allocatedLabCount = $allocatedRooms
+        ->filter(fn (RoomAllocation $allocation): bool => $allocationType($allocation) === 'Lab')
+        ->sum($roomCount);
     $unallocatedCount = RoomAllocation::where('status', 'Unallocated')->count();
 
     $allocationStatus = null;
 
     if ($request->isMethod('post')) {
+
+        if ($request->input('form_type') === 'filtered-auto-allocate') {
+            $data = $request->validate([
+                'department_id' => 'required|integer|exists:departments,id',
+                'semester' => 'required|string|max:10',
+                'division' => 'required|string|max:10',
+                'term' => 'required|string|max:20',
+                'academic_year' => 'required|string|max:20',
+            ]);
+            $result = $allocationService->generateForSelection($data);
+
+            if ($result['allocatedClassrooms'] > 0) {
+                Notification::trigger('Classroom Allocation Completed', ['count' => $result['allocatedClassrooms']]);
+            }
+            if ($result['allocatedLabs'] > 0) {
+                Notification::trigger('Lab Allocation Completed', ['count' => $result['allocatedLabs']]);
+            }
+
+            return redirect('/admin/classroom-allocation?'.http_build_query([
+                'department_id' => $data['department_id'],
+                'semester' => $data['semester'],
+                'division' => $data['division'],
+            ]))->with('allocation_status', "Generated {$result['created']} allocation records.");
+        }
+
+        if ($request->input('form_type') === 'auto-allocate' || $request->input('form_type') === 're-generate') {
+            $result = $allocationService->generateAll();
+
+            if ($result['allocatedClassrooms'] > 0) {
+                Notification::trigger('Classroom Allocation Completed', ['count' => $result['allocatedClassrooms']]);
+            }
+            if ($result['allocatedLabs'] > 0) {
+                Notification::trigger('Lab Allocation Completed', ['count' => $result['allocatedLabs']]);
+            }
+
+            return redirect('/admin/classroom-allocation')
+                ->with('allocation_status', "Generated {$result['created']} allocation records.");
+        }
 
         // ── Filtered Auto-Allocate: only for selected dept/semester/division ──
         if ($request->input('form_type') === 'filtered-auto-allocate') {

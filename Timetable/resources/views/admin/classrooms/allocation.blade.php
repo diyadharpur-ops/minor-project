@@ -106,16 +106,6 @@
         align-items: center;
         margin-bottom: 16px;
     }
-    .note-card {
-        background: #fffbeb;
-        border: 1px solid #fef3c7;
-        color: #92400e;
-        padding: 16px;
-        border-radius: 8px;
-        margin-top: 24px;
-        font-size: 0.9rem;
-    }
-
     /* Filter Form */
     .filter-card {
         background: white;
@@ -237,7 +227,7 @@
         <div class="filter-row">
             <div class="filter-group">
                 <label>Department</label>
-                <select name="department_id" required>
+                <select name="department_id" required onchange="submitFilteredAllocationWhenReady()">
                     <option value="">Select Department</option>
                     @foreach ($departments as $dept)
                         <option value="{{ $dept->id }}"
@@ -249,7 +239,7 @@
             </div>
             <div class="filter-group">
                 <label>Semester</label>
-                <select name="semester" required>
+                <select name="semester" required onchange="submitFilteredAllocationWhenReady()">
                     <option value="">Select Semester</option>
                     @foreach ($semesters as $sem)
                         <option value="{{ $sem }}"
@@ -261,7 +251,7 @@
             </div>
             <div class="filter-group">
                 <label>Division</label>
-                <select name="division" required>
+                <select name="division" required onchange="submitFilteredAllocationWhenReady()">
                     <option value="">Select Division</option>
                     @foreach ($divisions as $division)
                         <option value="{{ $division }}"
@@ -273,7 +263,7 @@
             </div>
             <div class="filter-group">
                 <label>Term</label>
-                <select name="term" required>
+                <select name="term" required onchange="submitFilteredAllocationWhenReady()">
                     <option value="">Select Term</option>
                     @foreach ($terms as $term)
                         <option value="{{ $term }}" {{ old('term', request('term')) == $term ? 'selected' : '' }}>{{ $term }}</option>
@@ -282,7 +272,7 @@
             </div>
             <div class="filter-group">
                 <label>Academic Year</label>
-                <select name="academic_year" required>
+                <select name="academic_year" required onchange="submitFilteredAllocationWhenReady()">
                     <option value="">Select Academic Year</option>
                     @foreach ($academicYears as $academicYear)
                         <option value="{{ $academicYear }}" {{ old('academic_year', request('academic_year')) == $academicYear ? 'selected' : '' }}>{{ $academicYear }}</option>
@@ -298,6 +288,17 @@
         </div>
     </form>
 </div>
+
+<script>
+    function submitFilteredAllocationWhenReady() {
+        const form = document.getElementById('filteredGenForm');
+        const button = document.getElementById('filteredGenBtn');
+
+        if (form.checkValidity() && !button.disabled) {
+            button.click();
+        }
+    }
+</script>
 
 <div class="summary-grid">
     <div class="summary-card">
@@ -355,6 +356,7 @@
                     <th>Class / Division</th>
                     <th>Subject</th>
                     <th>Subject Type</th>
+                    <th>Allocation Type</th>
                     <th>Allocated Classroom / Lab</th>
                     <th>Status</th>
                 </tr>
@@ -365,15 +367,13 @@
                         <td>{{ method_exists($allocations, 'firstItem') ? $allocations->firstItem() + $index : $index + 1 }}</td>
                         <td>{{ $allocation->class_name }}</td>
                         <td>{{ $allocation->subject?->name ?? '—' }}</td>
-                        <td>
-                            @php
-                                $subType = $allocation->subject?->subject_type ?? 'Classroom';
-                                $isLab = str_contains(strtolower($subType), 'lab') || str_contains(strtolower($subType), 'practical');
-                            @endphp
-                            <span class="badge {{ $isLab ? 'badge-lab' : 'badge-classroom' }}">
-                                {{ $isLab ? 'Lab' : 'Classroom' }}
-                            </span>
-                        </td>
+                        @php
+                            $subType = strtolower((string) ($allocation->subject?->subject_type ?? 'lecture'));
+                            $subjectType = str_contains($subType, 'lab') || str_contains($subType, 'practical') ? 'Lab' : (str_contains($subType, 'tutorial') ? 'Tutorial' : 'Lecture');
+                            $allocationType = $allocation->allocation_type ?: ($subjectType === 'Lab' ? 'Lab' : 'Classroom');
+                        @endphp
+                        <td><span class="badge {{ $subjectType === 'Lab' ? 'badge-lab' : 'badge-classroom' }}">{{ $subjectType }}</span></td>
+                        <td><span class="badge {{ $allocationType === 'Lab' ? 'badge-lab' : 'badge-classroom' }}">{{ $allocationType }}</span></td>
                         <td>{{ $allocation->notes ?: ($allocation->classroom?->room_number ?? '—') }}</td>
                         <td>
                             @if($allocation->status == 'Allocated')
@@ -384,17 +384,12 @@
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="6" style="text-align: center; padding: 24px;">No allocation records found. Use the filter form above to auto-generate allocation for a specific class.</td></tr>
+                    <tr><td colspan="7" style="text-align: center; padding: 24px;">No allocation records found. Use the filter form above to auto-generate allocation for a specific class.</td></tr>
                 @endforelse
             </tbody>
         </table>
     </div>
 
-    @if(method_exists($allocations, 'links'))
-        <div style="margin-top: 16px;">
-            {{ $allocations->links() }}
-        </div>
-    @endif
 </div>
 
 @endsection
