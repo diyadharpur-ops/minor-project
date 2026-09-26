@@ -154,16 +154,21 @@ class FacultyAllocationService
                 }
 
                 foreach ($subjects as $subject) {
-                    $allocation = RoomAllocation::query()->firstOrNew([
+                    $allocations = RoomAllocation::query()->where([
                         'department_id' => $batch['department_id'],
                         'semester' => $batch['semester'],
                         'subject_id' => $subject->id,
                         'class_name' => $batch['class_name'],
-                    ]);
+                    ])->get();
 
-                    $room = $allocation->classroom_id
-                        ? Classroom::find($allocation->classroom_id)
-                        : $this->roomFor($subject);
+                    if ($allocations->isEmpty()) {
+                        $allocations->push(new RoomAllocation([
+                            'department_id' => $batch['department_id'],
+                            'semester' => $batch['semester'],
+                            'subject_id' => $subject->id,
+                            'class_name' => $batch['class_name'],
+                        ]));
+                    }
 
                     $faculty = $subject->faculty ?? $this->findFacultyForSubject($subject, $batch);
 
@@ -178,17 +183,10 @@ class FacultyAllocationService
                         $warnings->push("Faculty workload is overloaded for {$subject->name} in {$batch['class_name']}.");
                     }
 
-                    if (! $room) {
-                        $warnings->push("No classroom/lab location assigned for {$subject->name} in {$batch['class_name']}.");
+                    foreach ($allocations as $allocation) {
+                        $allocation->faculty_id = $faculty?->id;
+                        $allocation->save();
                     }
-
-                    $allocation->fill([
-                        'faculty_id' => $faculty?->id,
-                        'classroom_id' => $room?->id,
-                        'status' => $room ? 'Allocated' : 'Unallocated',
-                        'notes' => $room?->room_number,
-                    ]);
-                    $allocation->save();
                     $created++;
                 }
             }

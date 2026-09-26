@@ -74,11 +74,19 @@ class ClassroomAllocationService
         $allocatedLabs = 0;
         $unallocated = 0;
 
+        // Load initial usage counts for classrooms
+        $classroomUsage = RoomAllocation::query()
+            ->where('allocation_type', 'Classroom')
+            ->whereNotNull('classroom_id')
+            ->select('classroom_id', DB::raw('count(distinct class_name) as count'))
+            ->groupBy('classroom_id')
+            ->pluck('count', 'classroom_id')
+            ->toArray();
+
         DB::transaction(function () use (
             $batches, $classrooms, $labs, $selection,
-            &$created, &$allocatedClassrooms, &$allocatedLabs, &$unallocated
+            &$created, &$allocatedClassrooms, &$allocatedLabs, &$unallocated, &$classroomUsage
         ): void {
-            $classroomIndex = 0;
             $labIndex = 0;
 
             foreach ($batches as $batch) {
@@ -120,8 +128,19 @@ class ClassroomAllocationService
                     $batchClassroom = $classrooms->firstWhere('id', $existingAssignedRoomId);
                 }
                 if (! $batchClassroom && $classrooms->isNotEmpty()) {
-                    $batchClassroom = $classrooms[$classroomIndex % $classrooms->count()];
-                    $classroomIndex++;
+                    $minUsage = null;
+                    $bestRoom = null;
+                    foreach ($classrooms as $room) {
+                        $usage = $classroomUsage[$room->id] ?? 0;
+                        if ($minUsage === null || $usage < $minUsage) {
+                            $minUsage = $usage;
+                            $bestRoom = $room;
+                        }
+                    }
+                    $batchClassroom = $bestRoom;
+                    if ($batchClassroom) {
+                        $classroomUsage[$batchClassroom->id] = ($classroomUsage[$batchClassroom->id] ?? 0) + 1;
+                    }
                 }
 
                 foreach ($subjects as $subject) {
