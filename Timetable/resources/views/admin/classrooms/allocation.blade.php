@@ -251,7 +251,7 @@
             </div>
             <div class="filter-group">
                 <label>Division</label>
-                <select name="division" required onchange="submitFilteredAllocationWhenReady()">
+                <select name="division" onchange="submitFilteredAllocationWhenReady()">
                     <option value="">Select Division</option>
                     @foreach ($divisions as $division)
                         <option value="{{ $division }}"
@@ -356,35 +356,87 @@
                     <th>Class / Division</th>
                     <th>Subject</th>
                     <th>Subject Type</th>
+                    <th>Faculty</th>
                     <th>Allocation Type</th>
                     <th>Allocated Classroom / Lab</th>
                     <th>Status</th>
                 </tr>
             </thead>
             <tbody>
-                @forelse ($allocations as $index => $allocation)
-                    <tr>
-                        <td>{{ method_exists($allocations, 'firstItem') ? $allocations->firstItem() + $index : $index + 1 }}</td>
-                        <td>{{ $allocation->class_name }}</td>
-                        <td>{{ $allocation->subject?->name ?? '—' }}</td>
+                @php
+                    $rowNumber = method_exists($allocations, 'firstItem') ? ($allocations->firstItem() ?? 1) : 1;
+                @endphp
+                @forelse ($allocations as $allocation)
+                    @php
+                        $subject = $allocation->subject;
+                        $facultyName = $allocation->faculty?->name ?? ($subject?->faculty?->name ?? '—');
+                        $isLabAlloc = $allocation->allocation_type === 'Lab'
+                            || (! $allocation->allocation_type && str_contains(strtolower((string) $subject?->subject_type), 'lab'));
+                    @endphp
+
+                    @if ($isLabAlloc)
                         @php
-                            $subType = strtolower((string) ($allocation->subject?->subject_type ?? 'lecture'));
-                            $subjectType = str_contains($subType, 'lab') || str_contains($subType, 'practical') ? 'Lab' : (str_contains($subType, 'tutorial') ? 'Tutorial' : 'Lecture');
-                            $allocationType = $allocation->allocation_type ?: ($subjectType === 'Lab' ? 'Lab' : 'Classroom');
+                            // Build combined lab room string: "F011, F012"
+                            $lab1Room = $allocation->classroom?->room_number;
+                            $lab2Room = $allocation->secondClassroom?->room_number;
+                            if (! $lab1Room && ! $lab2Room && $allocation->notes) {
+                                $parts    = explode(' + ', $allocation->notes);
+                                $lab1Room = trim($parts[0] ?? '');
+                                $lab2Room = trim($parts[1] ?? '');
+                            }
+                            $labRooms = collect([$lab1Room, $lab2Room])->filter()->implode(', ');
+                            if (! $labRooms) {
+                                $labRooms = '—';
+                            }
                         @endphp
-                        <td><span class="badge {{ $subjectType === 'Lab' ? 'badge-lab' : 'badge-classroom' }}">{{ $subjectType }}</span></td>
-                        <td><span class="badge {{ $allocationType === 'Lab' ? 'badge-lab' : 'badge-classroom' }}">{{ $allocationType }}</span></td>
-                        <td>{{ $allocation->notes ?: ($allocation->classroom?->room_number ?? '—') }}</td>
-                        <td>
-                            @if($allocation->status == 'Allocated')
-                                <span class="badge badge-allocated">Allocated</span>
-                            @else
-                                <span class="badge badge-unallocated">Unallocated</span>
-                            @endif
-                        </td>
-                    </tr>
+                        {{-- Single Lab Row with both labs --}}
+                        <tr>
+                            <td>{{ $rowNumber++ }}</td>
+                            <td>{{ $allocation->class_name }}</td>
+                            <td>{{ $subject?->name ?? '—' }}</td>
+                            <td><span class="badge badge-lab">Lab</span></td>
+                            <td>{{ $facultyName }}</td>
+                            <td><span class="badge badge-lab">Lab</span></td>
+                            <td>{{ $labRooms }}</td>
+                            <td>
+                                <span class="badge {{ $allocation->status === 'Allocated' ? 'badge-allocated' : 'badge-unallocated' }}">
+                                    {{ $allocation->status }}
+                                </span>
+                            </td>
+                        </tr>
+                    @else
+                        @php
+                            $subTypes = collect();
+                            $hasLecture  = ((int) ($subject?->lecture_credit  ?? 0)) > 0;
+                            $hasTutorial = ((int) ($subject?->tutorial_credit ?? 0)) > 0;
+
+                            if ($hasLecture)  { $subTypes->push('Lecture'); }
+                            if ($hasTutorial) { $subTypes->push('Tutorial'); }
+                            if ($subTypes->isEmpty()) {
+                                $rawType = strtolower((string) ($subject?->subject_type ?? 'lecture'));
+                                $subTypes->push(str_contains($rawType, 'tutorial') ? 'Tutorial' : 'Lecture');
+                            }
+                        @endphp
+
+                        @foreach ($subTypes as $sType)
+                            <tr>
+                                <td>{{ $rowNumber++ }}</td>
+                                <td>{{ $allocation->class_name }}</td>
+                                <td>{{ $subject?->name ?? '—' }}</td>
+                                <td><span class="badge badge-classroom">{{ $sType }}</span></td>
+                                <td>{{ $facultyName }}</td>
+                                <td><span class="badge badge-classroom">Classroom</span></td>
+                                <td>{{ $allocation->classroom?->room_number ?? ($allocation->notes ?: '—') }}</td>
+                                <td>
+                                    <span class="badge {{ $allocation->status === 'Allocated' ? 'badge-allocated' : 'badge-unallocated' }}">
+                                        {{ $allocation->status }}
+                                    </span>
+                                </td>
+                            </tr>
+                        @endforeach
+                    @endif
                 @empty
-                    <tr><td colspan="7" style="text-align: center; padding: 24px;">No allocation records found. Use the filter form above to auto-generate allocation for a specific class.</td></tr>
+                    <tr><td colspan="8" style="text-align: center; padding: 24px;">No allocation records found. Click Auto Generate to start.</td></tr>
                 @endforelse
             </tbody>
         </table>

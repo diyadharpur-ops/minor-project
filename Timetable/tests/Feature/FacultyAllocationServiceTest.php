@@ -199,7 +199,7 @@ test('admin faculty allocation page derives semester and division options from a
         'Lecture',
         'Dr. R. Sharma',
         '3 Hours',
-        'Lecture',
+        'Classroom',
         'Operating Systems',
         'Lab',
         'Dr. R. Sharma',
@@ -209,7 +209,7 @@ test('admin faculty allocation page derives semester and division options from a
         'Tutorial',
         'Dr. R. Sharma',
         '1 Hour',
-        'Tutorial',
+        'Classroom',
     ]);
 });
 

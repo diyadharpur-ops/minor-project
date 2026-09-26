@@ -35,6 +35,10 @@
                 </select>
             </div>
             <div class="form-row">
+                <label>Location</label>
+                <input type="text" name="location" value="{{ old('location', $classroom->location) }}" placeholder="e.g. Main Building" />
+            </div>
+            <div class="form-row">
                 <label>Availability</label>
                 <select name="availability" required>
                     <option value="Available" {{ old('availability', $classroom->availability) === 'Available' ? 'selected' : '' }}>Available</option>

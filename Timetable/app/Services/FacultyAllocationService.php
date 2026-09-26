@@ -110,7 +110,7 @@ class FacultyAllocationService
             $query->whereHas('subject', fn ($subjectQuery) => $subjectQuery->where('subject_type', $filters['subject_type']));
         }
 
-        return $query->get();
+        return $query->get()->unique(fn ($a) => ($a->class_name ?? '').'|'.$a->subject_id)->values();
     }
 
     public function generate(): array

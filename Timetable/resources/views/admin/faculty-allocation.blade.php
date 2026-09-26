@@ -160,14 +160,29 @@
                                         ['type' => 'Lab', 'hours' => (int) ($subject?->lab_credit ?? 0) * 2],
                                         ['type' => 'Tutorial', 'hours' => (int) ($subject?->tutorial_credit ?? 0)],
                                     ])->filter(fn (array $row): bool => $row['hours'] > 0);
+
+                                    if ($allocationRows->isEmpty() && $subject) {
+                                        $subTypeRaw = strtolower((string) $subject->subject_type);
+                                        $detectedType = str_contains($subTypeRaw, 'lab') || str_contains($subTypeRaw, 'practical') ? 'Lab' : (str_contains($subTypeRaw, 'tutorial') ? 'Tutorial' : 'Lecture');
+                                        $allocationRows = collect([
+                                            ['type' => $detectedType, 'hours' => (int) ($subject->weekly_hours ?: 1)],
+                                        ]);
+                                    }
                                 @endphp
                                 @foreach ($allocationRows as $allocationRow)
+                                    @php
+                                        $allocType = match ($allocationRow['type']) {
+                                            'Lecture', 'Tutorial' => 'Classroom',
+                                            'Lab' => 'Lab',
+                                            default => 'Classroom',
+                                        };
+                                    @endphp
                                     <tr>
                                         <td>{{ $subject?->name ?? '—' }}</td>
                                         <td>{{ $allocationRow['type'] }}</td>
                                         <td>{{ $facultyName }}</td>
                                         <td>{{ $allocationRow['hours'] }} {{ $allocationRow['hours'] === 1 ? 'Hour' : 'Hours' }}</td>
-                                        <td>{{ $allocationRow['type'] }}</td>
+                                        <td>{{ $allocType }}</td>
                                     </tr>
                                 @endforeach
                             @endforeach

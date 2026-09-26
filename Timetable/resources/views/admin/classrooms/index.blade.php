@@ -29,6 +29,7 @@
                         <th>Room Number</th>
                         <th>Capacity</th>
                         <th>Type</th>
+                        <th>Location</th>
                         <th>Availability</th>
                         <th>Actions</th>
                     </tr>
@@ -40,6 +41,7 @@
                             <td>{{ $classroom->room_number }}</td>
                             <td>{{ $classroom->room_capacity }}</td>
                             <td>{{ $classroom->room_type }}</td>
+                            <td>{{ $classroom->location ?: '—' }}</td>
                             <td>{{ $classroom->availability }}</td>
                             <td class="actions">
                                 <a href="/admin/classrooms/{{ $classroom->id }}/edit" class="btn btn-muted">Edit</a>
@@ -50,7 +52,7 @@
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="6">No classrooms found.</td></tr>
+                        <tr><td colspan="7">No classrooms found.</td></tr>
                     @endforelse
                 </tbody>
             </table>

@@ -12,7 +12,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'subject_id',
     'faculty_id',
     'classroom_id',
+    'second_classroom_id',
     'class_name',
+    'division',
+    'term',
+    'academic_year',
     'day',
     'start_time',
     'end_time',
@@ -41,5 +45,10 @@ class RoomAllocation extends Model
     public function classroom(): BelongsTo
     {
         return $this->belongsTo(Classroom::class);
+    }
+
+    public function secondClassroom(): BelongsTo
+    {
+        return $this->belongsTo(Classroom::class, 'second_classroom_id');
     }
 }

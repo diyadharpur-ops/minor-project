@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Classroom;
 use App\Models\Department;
+use App\Models\Faculty;
 use App\Models\RoomAllocation;
 use App\Models\Subject;
 use App\Models\User;
@@ -12,151 +13,209 @@ use Illuminate\Support\Facades\DB;
 
 class ClassroomAllocationService
 {
-    private const CLASSROOM_CAPACITY = 80;
-
-    private const LAB_CAPACITY = 40;
+    public function __construct(
+        protected ?FacultyAllocationService $facultyAllocationService = null
+    ) {
+        $this->facultyAllocationService = $facultyAllocationService ?? new FacultyAllocationService;
+    }
 
     public function generateForSelection(array $selection): array
     {
-        $department = Department::findOrFail($selection['department_id']);
-        $className = $department->name.'-'.$selection['semester'].'-'.$selection['division'];
-        $subjects = Subject::query()
-            ->where('department_id', $department->id)
-            ->where('semester', $selection['semester'])
-            ->orderBy('name')
-            ->get();
+        $batches = $this->facultyAllocationService->batchesForSelection($selection);
 
-        return $this->generateGroups([[
-            'department_id' => $department->id,
-            'department_name' => $department->name,
-            'semester' => $selection['semester'],
-            'division' => $selection['division'],
-            'class_name' => $className,
-            'subjects' => $subjects,
-        ]], [$className]);
+        if ($batches->isEmpty()) {
+            $department = Department::find($selection['department_id'] ?? null);
+            if ($department && ! empty($selection['semester'])) {
+                $div = ! empty($selection['division']) ? $selection['division'] : null;
+                $className = $department->name.'-'.$selection['semester'].($div ? '-'.$div : '');
+                $batches = collect([[
+                    'key' => $department->id.'|'.$selection['semester'].'|'.($div ?? ''),
+                    'department_id' => $department->id,
+                    'department_name' => $department->name,
+                    'semester' => (string) $selection['semester'],
+                    'name' => $div ?? (string) $selection['semester'],
+                    'division_id' => null,
+                    'class_name' => $className,
+                ]]);
+            }
+        }
+
+        return $this->allocateBatches($batches, $selection);
     }
 
     public function generateAll(): array
     {
-        $groups = collect();
+        $batches = $this->facultyAllocationService->batches();
 
-        Subject::query()
-            ->select(['department_id', 'semester'])
-            ->whereNotNull('semester')
-            ->distinct()
-            ->get()
-            ->each(function (Subject $subject) use ($groups): void {
-                $department = Department::find($subject->department_id);
-
-                if (! $department) {
-                    return;
-                }
-
-                $divisions = User::query()
-                    ->whereNotNull('enrollment_number')
-                    ->where('department', $department->name)
-                    ->where('semester', $subject->semester)
-                    ->whereNotNull('divcon')
-                    ->where('divcon', '!=', '')
-                    ->select('divcon')
-                    ->distinct()
-                    ->orderBy('divcon')
-                    ->pluck('divcon');
-
-                if ($divisions->isEmpty()) {
-                    $divisions = collect([null]);
-                }
-
-                foreach ($divisions as $division) {
-                    $className = $department->name.'-'.$subject->semester.($division ? '-'.$division : '');
-                    $groups->push([
-                        'department_id' => $department->id,
-                        'department_name' => $department->name,
-                        'semester' => $subject->semester,
-                        'division' => $division,
-                        'class_name' => $className,
-                        'subjects' => Subject::query()
-                            ->where('department_id', $department->id)
-                            ->where('semester', $subject->semester)
-                            ->orderBy('name')
-                            ->get(),
-                    ]);
-                }
-            });
-
-        return $this->generateGroups($groups->all(), $groups->pluck('class_name')->all(), true);
+        return $this->allocateBatches($batches, [], true);
     }
 
-    private function generateGroups(array $groups, array $classNames, bool $deleteAll = false): array
+    private function allocateBatches(Collection $batches, array $selection = [], bool $isAll = false): array
     {
-        $rooms = Classroom::query()
+        $classrooms = Classroom::query()
             ->where('availability', 'Available')
+            ->where(function ($query) {
+                $query->where('room_type', 'Classroom')
+                    ->orWhere('room_type', 'not like', '%lab%');
+            })
             ->whereNotNull('room_number')
             ->orderBy('room_number')
             ->get();
-        $classrooms = $rooms->filter(fn (Classroom $room): bool => $this->roomType($room->room_type) === 'Classroom')->values();
-        $labs = $rooms->filter(fn (Classroom $room): bool => $this->roomType($room->room_type) === 'Lab')->values();
+
+        $labs = Classroom::query()
+            ->where('availability', 'Available')
+            ->where('room_type', 'like', '%lab%')
+            ->whereNotNull('room_number')
+            ->orderBy('room_number')
+            ->get();
+
         $created = 0;
         $allocatedClassrooms = 0;
         $allocatedLabs = 0;
         $unallocated = 0;
 
-        DB::transaction(function () use ($groups, $classNames, $deleteAll, $classrooms, $labs, &$created, &$allocatedClassrooms, &$allocatedLabs, &$unallocated): void {
-            if ($deleteAll) {
-                RoomAllocation::query()->delete();
-            } else {
-                RoomAllocation::query()->whereIn('class_name', $classNames)->delete();
-            }
+        DB::transaction(function () use (
+            $batches, $classrooms, $labs, $selection,
+            &$created, &$allocatedClassrooms, &$allocatedLabs, &$unallocated
+        ): void {
+            $classroomIndex = 0;
+            $labIndex = 0;
 
-            foreach ($groups as $group) {
-                $studentStrength = $this->studentStrength($group['department_name'], $group['semester'], $group['division']);
-                $usedRoomIds = [];
-                $classroomOffset = 0;
-                $labOffset = 0;
+            foreach ($batches as $batch) {
+                $existingFacultyAllocations = RoomAllocation::query()
+                    ->where('department_id', $batch['department_id'])
+                    ->where('semester', $batch['semester'])
+                    ->where('class_name', $batch['class_name'])
+                    ->whereNotNull('faculty_id')
+                    ->get()
+                    ->keyBy('subject_id');
 
-                foreach ($group['subjects'] as $subject) {
-                    $subjectType = $this->subjectType($subject->subject_type);
-                    $allocationType = $subjectType === 'Lab' ? 'Lab' : 'Classroom';
-                    $capacity = $allocationType === 'Lab' ? self::LAB_CAPACITY : self::CLASSROOM_CAPACITY;
-                    $requiredRooms = $studentStrength > 0 ? (int) ceil($studentStrength / $capacity) : 0;
-                    $roomPool = $allocationType === 'Lab' ? $labs : $classrooms;
-                    $offset = $allocationType === 'Lab' ? $labOffset : $classroomOffset;
-                    $selectedRooms = $this->selectRooms($roomPool, $requiredRooms, $offset, $usedRoomIds);
-                    $isAllocated = $requiredRooms > 0 && $selectedRooms->count() === $requiredRooms;
-                    $roomNumbers = $selectedRooms->pluck('room_number')->values();
+                $subjects = Subject::query()
+                    ->with('faculty')
+                    ->where('department_id', $batch['department_id'])
+                    ->where('semester', $batch['semester'])
+                    ->orderBy('name')
+                    ->get();
 
-                    if ($isAllocated) {
-                        foreach ($selectedRooms as $room) {
-                            $usedRoomIds[$room->id] = true;
-                        }
+                if ($subjects->isEmpty()) {
+                    continue;
+                }
 
-                        if ($allocationType === 'Lab') {
-                            $labOffset = ($labOffset + $requiredRooms) % max(1, $labs->count());
-                            $allocatedLabs += $roomNumbers->count();
-                        } else {
-                            $classroomOffset = ($classroomOffset + $requiredRooms) % max(1, $classrooms->count());
-                            $allocatedClassrooms += $roomNumbers->count();
-                        }
-                    } else {
-                        $unallocated++;
+                $studentStrength = $this->studentStrength(
+                    $batch['department_name'] ?? '',
+                    (string) $batch['semester'],
+                    $batch['name'] ?? null
+                );
+
+                // RULE: For Lecture and Tutorial belonging to the SAME existing Batch / Class / Division:
+                // Use the SAME Classroom. Reuse existing classroom assigned to this batch if available.
+                $existingAssignedRoomId = RoomAllocation::query()
+                    ->where('class_name', $batch['class_name'])
+                    ->where('allocation_type', 'Classroom')
+                    ->whereNotNull('classroom_id')
+                    ->value('classroom_id');
+
+                $batchClassroom = null;
+                if ($existingAssignedRoomId) {
+                    $batchClassroom = $classrooms->firstWhere('id', $existingAssignedRoomId);
+                }
+                if (! $batchClassroom && $classrooms->isNotEmpty()) {
+                    $batchClassroom = $classrooms[$classroomIndex % $classrooms->count()];
+                    $classroomIndex++;
+                }
+
+                foreach ($subjects as $subject) {
+                    $facultyId = $existingFacultyAllocations->get($subject->id)?->faculty_id
+                        ?? $subject->faculty_id
+                        ?? $this->findFacultyId($subject, $batch);
+
+                    $hasLecture = ((int) ($subject->lecture_credit ?? 0)) > 0;
+                    $hasTutorial = ((int) ($subject->tutorial_credit ?? 0)) > 0;
+                    $hasLab = ((int) ($subject->lab_credit ?? 0)) > 0
+                        || str_contains(strtolower((string) $subject->subject_type), 'lab')
+                        || str_contains(strtolower((string) $subject->subject_type), 'practical');
+
+                    if (! $hasLecture && ! $hasTutorial && ! $hasLab) {
+                        $hasLecture = true;
                     }
 
-                    RoomAllocation::create([
-                        'department_id' => $group['department_id'],
-                        'semester' => $group['semester'],
-                        'subject_id' => $subject->id,
-                        'faculty_id' => $subject->faculty_id,
-                        'classroom_id' => $selectedRooms->first()?->id,
-                        'class_name' => $group['class_name'],
-                        'student_count' => $studentStrength,
-                        'allocation_type' => $allocationType,
-                        'day' => '-',
-                        'start_time' => null,
-                        'end_time' => null,
-                        'status' => $isAllocated ? 'Allocated' : 'Unallocated',
-                        'notes' => $roomNumbers->implode(', '),
-                    ]);
-                    $created++;
+                    // 1. Lecture and/or Tutorial -> Allocation Type = Classroom (1 Classroom)
+                    if ($hasLecture || $hasTutorial) {
+                        RoomAllocation::updateOrCreate([
+                            'department_id' => $batch['department_id'],
+                            'semester' => $batch['semester'],
+                            'subject_id' => $subject->id,
+                            'class_name' => $batch['class_name'],
+                            'allocation_type' => 'Classroom',
+                        ], [
+                            'faculty_id' => $facultyId,
+                            'classroom_id' => $batchClassroom?->id,
+                            'second_classroom_id' => null,
+                            'division' => $batch['name'] ?? null,
+                            'term' => $selection['term'] ?? null,
+                            'academic_year' => $selection['academic_year'] ?? null,
+                            'day' => '-',
+                            'start_time' => null,
+                            'end_time' => null,
+                            'status' => $batchClassroom ? 'Allocated' : 'Unallocated',
+                            'notes' => $batchClassroom?->room_number,
+                            'student_count' => $studentStrength,
+                        ]);
+
+                        $created++;
+                        if ($batchClassroom) {
+                            $allocatedClassrooms++;
+                        } else {
+                            $unallocated++;
+                        }
+                    }
+
+                    // 2. Lab -> Allocation Type = Lab (EXACTLY 2 Labs from Manage Classrooms)
+                    if ($hasLab) {
+                        $selectedLabs = collect();
+                        if ($labs->count() >= 2) {
+                            $selectedLabs->push($labs[$labIndex % $labs->count()]);
+                            $selectedLabs->push($labs[($labIndex + 1) % $labs->count()]);
+                            $labIndex += 2;
+                        } elseif ($labs->count() === 1) {
+                            $selectedLabs->push($labs[0]);
+                        }
+
+                        $lab1 = $selectedLabs->first();
+                        $lab2 = $selectedLabs->skip(1)->first();
+                        $isAllocated = ($lab1 && $lab2);
+                        $labNotes = $isAllocated
+                            ? "{$lab1->room_number} + {$lab2->room_number}"
+                            : ($lab1?->room_number ?? null);
+
+                        RoomAllocation::updateOrCreate([
+                            'department_id' => $batch['department_id'],
+                            'semester' => $batch['semester'],
+                            'subject_id' => $subject->id,
+                            'class_name' => $batch['class_name'],
+                            'allocation_type' => 'Lab',
+                        ], [
+                            'faculty_id' => $facultyId,
+                            'classroom_id' => $lab1?->id,
+                            'second_classroom_id' => $lab2?->id,
+                            'division' => $batch['name'] ?? null,
+                            'term' => $selection['term'] ?? null,
+                            'academic_year' => $selection['academic_year'] ?? null,
+                            'day' => '-',
+                            'start_time' => null,
+                            'end_time' => null,
+                            'status' => $isAllocated ? 'Allocated' : 'Unallocated',
+                            'notes' => $labNotes,
+                            'student_count' => $studentStrength,
+                        ]);
+
+                        $created++;
+                        if ($isAllocated) {
+                            $allocatedLabs += 2;
+                        } else {
+                            $unallocated++;
+                        }
+                    }
                 }
             }
         });
@@ -164,18 +223,13 @@ class ClassroomAllocationService
         return compact('created', 'allocatedClassrooms', 'allocatedLabs', 'unallocated');
     }
 
-    private function selectRooms(Collection $rooms, int $requiredRooms, int $offset, array $usedRoomIds): Collection
+    private function findFacultyId(Subject $subject, array $batch): ?int
     {
-        if ($requiredRooms === 0 || $rooms->isEmpty()) {
-            return collect();
+        if ($subject->faculty_id) {
+            return $subject->faculty_id;
         }
 
-        $ordered = $rooms->concat($rooms)->slice($offset, $rooms->count());
-
-        return $ordered
-            ->filter(fn (Classroom $room): bool => ! isset($usedRoomIds[$room->id]))
-            ->take($requiredRooms)
-            ->values();
+        return Faculty::where('department_id', $batch['department_id'])->orderBy('name')->value('id');
     }
 
     private function studentStrength(string $department, string $semester, ?string $division): int
@@ -199,7 +253,7 @@ class ClassroomAllocationService
             : (str_contains($value, 'tutorial') ? 'Tutorial' : 'Lecture');
     }
 
-    private function roomType(?string $value): string
+    public function roomType(?string $value): string
     {
         return str_contains(strtolower(trim((string) $value)), 'lab') ? 'Lab' : 'Classroom';
     }

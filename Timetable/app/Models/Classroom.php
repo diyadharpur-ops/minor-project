@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'facilities',
     'department_id',
     'availability',
+    'location',
 ])]
 class Classroom extends Model
 {
