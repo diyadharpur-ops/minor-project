@@ -307,10 +307,24 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
         ];
     }
 
+    $dbDivisions = Division::all()->groupBy('semester');
+    $divisionsMap = [];
+    foreach ($semesters as $sem) {
+        if ($dbDivisions->has($sem) && $dbDivisions->get($sem)->isNotEmpty()) {
+            $divisionsMap[$sem] = $dbDivisions->get($sem)->where('is_active', true)->pluck('name')->values()->toArray();
+        } else {
+            $divisionsMap[$sem] = ['A', 'B', 'C'];
+        }
+    }
+    $divisions = collect($divisionsMap)->flatten()->unique()->sort()->values();
+
     return view('admin.timetable.index', [
         'departments' => $departments,
         'timetable' => $timetable,
         'deptName' => $deptName,
+        'semesters' => $semesters,
+        'divisions' => $divisions,
+        'divisionsMap' => $divisionsMap,
         'semester' => request('semester'),
         'division' => request('division', 'A'),
         'academicYear' => request('academic_year', date('Y').'-'.(date('Y') + 1)),
@@ -331,6 +345,22 @@ Route::get('/admin/timetable/builder', function (Request $request) {
     $timeSlots = ['10:30-11:30', '11:30-12:30', '01:00-02:00', '02:00-03:00', '03:10-04:10', '04:10-05:10'];
     $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+    $semesters = Subject::whereNotNull('semester')->distinct()->pluck('semester')->toArray();
+    if (empty($semesters)) {
+        $semesters = ['1','2','3','4','5','6','7','8'];
+    }
+
+    $dbDivisions = Division::all()->groupBy('semester');
+    $divisionsMap = [];
+    foreach ($semesters as $sem) {
+        if ($dbDivisions->has($sem) && $dbDivisions->get($sem)->isNotEmpty()) {
+            $divisionsMap[$sem] = $dbDivisions->get($sem)->where('is_active', true)->pluck('name')->values()->toArray();
+        } else {
+            $divisionsMap[$sem] = ['A', 'B', 'C'];
+        }
+    }
+    $divisions = collect($divisionsMap)->flatten()->unique()->sort()->values();
+
     $entries = collect([]);
     if ($request->has('department_id') && $request->has('semester') && $request->has('division')) {
         $entries = TimetableEntry::where('department_id', $request->department_id)
@@ -339,7 +369,7 @@ Route::get('/admin/timetable/builder', function (Request $request) {
             ->get();
     }
 
-    return view('admin.timetable.builder', compact('departments', 'subjects', 'faculties', 'classrooms', 'timeSlots', 'days', 'entries'));
+    return view('admin.timetable.builder', compact('departments', 'subjects', 'faculties', 'classrooms', 'timeSlots', 'days', 'entries', 'semesters', 'divisions', 'divisionsMap'));
 });
 
 Route::post('/admin/timetable/builder', function (Request $request) {
@@ -895,6 +925,25 @@ Route::post('/admin/faculty-workload/{id}/delete', function ($id) {
     return redirect('/admin/faculty-workload')->with('status', 'Faculty workload deleted successfully.');
 });
 
+Route::post('/admin/divisions/toggle', function (Request $request) {
+    if (! session('admin.auth')) {
+        return response()->json(['error' => 'Unauthorized'], 401);
+    }
+    
+    $semester = $request->input('semester');
+    $division = $request->input('division');
+    $isActive = $request->boolean('is_active');
+    
+    if ($semester && $division) {
+        Division::updateOrCreate(
+            ['name' => $division, 'semester' => $semester],
+            ['is_active' => $isActive]
+        );
+        return response()->json(['success' => true]);
+    }
+    return response()->json(['success' => false], 400);
+});
+
 Route::get('/admin/subjects', function (Request $request) {
     if (! session('admin.auth')) {
         return redirect('/admin/login');
@@ -909,13 +958,20 @@ Route::get('/admin/subjects', function (Request $request) {
                 ->where('semester', $semester)
                 ->orderBy('name')
                 ->get();
-            if ($divisions->isEmpty()) {
-                $divisions = collect(['A', 'B', 'C'])
-                    ->map(fn ($name) => (object) ['name' => $name]);
+            
+            $defaultNames = ['A', 'B', 'C'];
+            $existingNames = $divisions->pluck('name')->toArray();
+            
+            foreach ($defaultNames as $name) {
+                if (!in_array($name, $existingNames)) {
+                    $divisions->push((object) ['name' => $name, 'is_active' => true]);
+                }
             }
+            
+            $divisions = $divisions->sortBy('name')->values();
 
             $perClassWeeklyHours = (int) $semesterSubjects->sum('weekly_hours');
-            $selectedClasses = $divisions->pluck('name')->all();
+            $selectedClasses = collect($divisions)->filter(fn($d) => $d->is_active ?? true)->pluck('name')->all();
             $totalClasses = count($selectedClasses);
 
             return [
@@ -1279,40 +1335,11 @@ Route::get('/admin/faculty-allocation', function (Request $request, FacultyAlloc
 
     $divisionOptions = collect();
     if (filled($departmentId) && filled($semester)) {
-        $batchDivisionOptions = $allBatches
-            ->filter(fn (array $batch): bool => (int) $batch['department_id'] === (int) $departmentId && (string) $batch['semester'] === (string) $semester)
-            ->pluck('name')
-            ->filter(fn ($name) => filled($name) && (string) $name !== (string) $semester)
-            ->unique()
-            ->values();
-
-        if ($batchDivisionOptions->isNotEmpty()) {
-            $divisionOptions = $batchDivisionOptions;
+        $dbDivisions = Division::where('semester', $semester)->get();
+        if ($dbDivisions->isEmpty()) {
+            $divisionOptions = collect(['A', 'B', 'C']);
         } else {
-            $departmentName = Department::find($departmentId)?->name;
-
-            if (filled($departmentName)) {
-                $divisionOptions = User::query()
-                    ->where('department', $departmentName)
-                    ->where('semester', $semester)
-                    ->whereNotNull('divcon')
-                    ->where('divcon', '!=', '')
-                    ->select('divcon')
-                    ->distinct()
-                    ->orderBy('divcon')
-                    ->pluck('divcon');
-            }
-
-            if ($divisionOptions->isEmpty()) {
-                $divisionOptions = Division::query()
-                    ->whereHas('subjects', fn ($query) => $query->where('department_id', $departmentId)->where('semester', $semester))
-                    ->orderBy('name')
-                    ->pluck('name');
-            }
-
-            if ($divisionOptions->isEmpty()) {
-                $divisionOptions = collect(['A', 'B', 'C']);
-            }
+            $divisionOptions = $dbDivisions->where('is_active', true)->pluck('name')->values();
         }
     }
 
@@ -1406,17 +1433,18 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
         ->distinct()
         ->orderBy('semester')
         ->pluck('semester');
-    $divisions = User::query()
-        ->whereNotNull('divcon')
-        ->where('divcon', '!=', '')
-        ->select('divcon')
-        ->distinct()
-        ->orderBy('divcon')
-        ->pluck('divcon')
-        ->merge(['A', 'B', 'C'])
-        ->unique()
-        ->sort()
-        ->values();
+        
+    $dbDivisions = Division::all()->groupBy('semester');
+    $divisionsMap = [];
+    foreach ($semesters as $sem) {
+        if ($dbDivisions->has($sem) && $dbDivisions->get($sem)->isNotEmpty()) {
+            $divisionsMap[$sem] = $dbDivisions->get($sem)->where('is_active', true)->pluck('name')->values()->toArray();
+        } else {
+            $divisionsMap[$sem] = ['A', 'B', 'C'];
+        }
+    }
+    $divisions = collect($divisionsMap)->flatten()->unique()->sort()->values();
+
     $academicYears = TimetableEntry::query()
         ->whereNotNull('academic_year')
         ->where('academic_year', '!=', '')
@@ -1515,6 +1543,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
         'departments' => $departments,
         'semesters' => $semesters,
         'divisions' => $divisions,
+        'divisionsMap' => $divisionsMap,
         'batches' => $batches,
         'academicYears' => $academicYears,
         'terms' => $terms,

@@ -51,16 +51,21 @@
             </div>
             <div style="flex: 1; min-width: 150px;">
                 <label style="font-weight: bold; margin-bottom: 5px; display: block;">Semester</label>
-                <select name="semester" class="entry-select" required>
+                <select name="semester" id="semesterSelect" class="entry-select" required onchange="updateDivisions()">
                     <option value="">Select Semester</option>
-                    @foreach(['1','2','3','4','5','6','7','8'] as $sem)
+                    @foreach($semesters as $sem)
                         <option value="{{ $sem }}" {{ old('semester', request('semester')) == $sem ? 'selected' : '' }}>Semester {{ $sem }}</option>
                     @endforeach
                 </select>
             </div>
             <div style="flex: 1; min-width: 150px;">
                 <label style="font-weight: bold; margin-bottom: 5px; display: block;">Division</label>
-                <input type="text" name="division" class="entry-select" placeholder="e.g. A" value="{{ old('division', request('division', 'A')) }}" required>
+                <select name="division" id="divisionSelect" class="entry-select" required>
+                    <option value="">Select Division</option>
+                    @foreach($divisions as $div)
+                        <option value="{{ $div }}" {{ old('division', request('division', 'A')) == $div ? 'selected' : '' }}>{{ $div }}</option>
+                    @endforeach
+                </select>
             </div>
             <div style="flex: 1; min-width: 150px;">
                 <label style="font-weight: bold; margin-bottom: 5px; display: block;">Academic Year</label>
@@ -84,4 +89,34 @@
         </div>
     </form>
 </div>
+
+<script>
+    const divisionsMap = @json($divisionsMap ?? []);
+    const oldDivision = "{{ request('division', 'A') }}";
+
+    function updateDivisions() {
+        const semesterSelect = document.getElementById('semesterSelect');
+        const divisionSelect = document.getElementById('divisionSelect');
+        const selectedSemester = semesterSelect.value;
+
+        const currentSelection = divisionSelect.value || oldDivision;
+        divisionSelect.innerHTML = '<option value="">Select Division</option>';
+
+        if (selectedSemester && divisionsMap[selectedSemester]) {
+            divisionsMap[selectedSemester].forEach(function(division) {
+                const option = document.createElement('option');
+                option.value = division;
+                option.textContent = division;
+                if (division === currentSelection) {
+                    option.selected = true;
+                }
+                divisionSelect.appendChild(option);
+            });
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        updateDivisions();
+    });
+</script>
 @endsection

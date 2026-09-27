@@ -216,7 +216,7 @@
                                             <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
                                                 @foreach ($semesterSummary['divisions'] as $division)
                                                     <label style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 999px; background: white;">
-                                                        <input type="checkbox" class="division-checkbox" data-semester="{{ $semester }}" data-division="{{ $division->name }}" checked>
+                                                        <input type="checkbox" class="division-checkbox" data-semester="{{ $semester }}" data-division="{{ $division->name }}" {{ ($division->is_active ?? true) ? 'checked' : '' }}>
                                                         <span>{{ $division->name }}</span>
                                                     </label>
                                                 @endforeach
@@ -354,6 +354,22 @@
                 const semester = checkbox.dataset.semester;
 
                 checkbox.addEventListener('change', function () {
+                    const divisionName = this.dataset.division;
+                    const isActive = this.checked;
+                    
+                    fetch('/admin/divisions/toggle', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                        },
+                        body: JSON.stringify({
+                            semester: semester,
+                            division: divisionName,
+                            is_active: isActive
+                        })
+                    }).catch(console.error);
+
                     const updatedClasses = [];
                     document.querySelectorAll('.division-checkbox[data-semester="' + semester + '"]').forEach(function (input) {
                         if (input.checked) {

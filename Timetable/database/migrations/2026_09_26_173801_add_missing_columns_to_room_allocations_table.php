@@ -12,9 +12,17 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('room_allocations', function (Blueprint $table) {
-            $table->string('division')->nullable();
-            $table->string('term')->nullable();
-            $table->string('academic_year')->nullable();
+            if (!Schema::hasColumn('room_allocations', 'division')) {
+                $table->string('division')->nullable();
+            }
+
+            if (!Schema::hasColumn('room_allocations', 'term')) {
+                $table->string('term')->nullable();
+            }
+
+            if (!Schema::hasColumn('room_allocations', 'academic_year')) {
+                $table->string('academic_year')->nullable();
+            }
         });
     }
 
@@ -23,8 +31,24 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('room_allocations', function (Blueprint $table) {
-            $table->dropColumn(['division', 'term', 'academic_year']);
-        });
+        $columns = [];
+
+        if (Schema::hasColumn('room_allocations', 'division')) {
+            $columns[] = 'division';
+        }
+
+        if (Schema::hasColumn('room_allocations', 'term')) {
+            $columns[] = 'term';
+        }
+
+        if (Schema::hasColumn('room_allocations', 'academic_year')) {
+            $columns[] = 'academic_year';
+        }
+
+        if (!empty($columns)) {
+            Schema::table('room_allocations', function (Blueprint $table) use ($columns) {
+                $table->dropColumn($columns);
+            });
+        }
     }
 };

@@ -239,7 +239,7 @@
             </div>
             <div class="filter-group">
                 <label>Semester</label>
-                <select name="semester" required onchange="submitFilteredAllocationWhenReady()">
+                <select name="semester" id="semesterSelect" required onchange="updateDivisions(); submitFilteredAllocationWhenReady()">
                     <option value="">Select Semester</option>
                     @foreach ($semesters as $sem)
                         <option value="{{ $sem }}"
@@ -251,7 +251,7 @@
             </div>
             <div class="filter-group">
                 <label>Division</label>
-                <select name="division" onchange="submitFilteredAllocationWhenReady()">
+                <select name="division" id="divisionSelect" onchange="submitFilteredAllocationWhenReady()">
                     <option value="">Select Division</option>
                     @foreach ($divisions as $division)
                         <option value="{{ $division }}"
@@ -290,6 +290,36 @@
 </div>
 
 <script>
+    const divisionsMap = @json($divisionsMap ?? []);
+    const oldDivision = "{{ request('division') }}";
+
+    function updateDivisions() {
+        const semesterSelect = document.getElementById('semesterSelect');
+        const divisionSelect = document.getElementById('divisionSelect');
+        const selectedSemester = semesterSelect.value;
+
+        // Save current selection if we're not just initializing
+        const currentSelection = divisionSelect.value || oldDivision;
+
+        // Clear existing options except the first one
+        divisionSelect.innerHTML = '<option value="">Select Division</option>';
+
+        if (selectedSemester && divisionsMap[selectedSemester]) {
+            divisionsMap[selectedSemester].forEach(function(division) {
+                const option = document.createElement('option');
+                option.value = division;
+                option.textContent = division;
+                if (division === currentSelection) {
+                    option.selected = true;
+                }
+                divisionSelect.appendChild(option);
+            });
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        updateDivisions();
+    });
     function submitFilteredAllocationWhenReady() {
         const form = document.getElementById('filteredGenForm');
         const button = document.getElementById('filteredGenBtn');

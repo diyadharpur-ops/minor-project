@@ -31,16 +31,21 @@
             </div>
             <div style="flex: 1;">
                 <label style="font-weight: bold; font-size: 14px;">Semester</label>
-                <select name="semester" class="entry-select" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc;" required>
+                <select name="semester" id="semesterSelect" class="entry-select" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc;" required onchange="updateDivisions()">
                     <option value="">Select Semester</option>
-                    @foreach(['1','2','3','4','5','6','7','8'] as $sem)
+                    @foreach($semesters ?? [] as $sem)
                         <option value="{{ $sem }}" {{ old('semester', $semester) == $sem ? 'selected' : '' }}>Semester {{ $sem }}</option>
                     @endforeach
                 </select>
             </div>
             <div style="flex: 1;">
                 <label style="font-weight: bold; font-size: 14px;">Division</label>
-                <input type="text" name="division" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc;" value="{{ old('division', $division) }}" required>
+                <select name="division" id="divisionSelect" class="entry-select" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc;" required>
+                    <option value="">Select Division</option>
+                    @foreach($divisions ?? [] as $div)
+                        <option value="{{ $div }}" {{ old('division', $division) == $div ? 'selected' : '' }}>{{ $div }}</option>
+                    @endforeach
+                </select>
             </div>
             <div style="flex: 1;">
                 <label style="font-weight: bold; font-size: 14px;">Term</label>
@@ -345,4 +350,34 @@
             <p>No timetable entries found for the selected criteria. <a href="/admin/timetable/builder">Go to Auto Generator to create one.</a></p>
         </div>
     @endif
+
+<script>
+    const divisionsMap = @json($divisionsMap ?? []);
+    const oldDivision = "{{ request('division', 'A') }}";
+
+    function updateDivisions() {
+        const semesterSelect = document.getElementById('semesterSelect');
+        const divisionSelect = document.getElementById('divisionSelect');
+        const selectedSemester = semesterSelect.value;
+
+        const currentSelection = divisionSelect.value || oldDivision;
+        divisionSelect.innerHTML = '<option value="">Select Division</option>';
+
+        if (selectedSemester && divisionsMap[selectedSemester]) {
+            divisionsMap[selectedSemester].forEach(function(division) {
+                const option = document.createElement('option');
+                option.value = division;
+                option.textContent = division;
+                if (division === currentSelection) {
+                    option.selected = true;
+                }
+                divisionSelect.appendChild(option);
+            });
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        updateDivisions();
+    });
+</script>
 @endsection
