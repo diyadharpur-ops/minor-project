@@ -102,17 +102,23 @@
         const currentSelection = divisionSelect.value || oldDivision;
         divisionSelect.innerHTML = '<option value="">Select Division</option>';
 
+        let optionsList = [];
         if (selectedSemester && divisionsMap[selectedSemester]) {
-            divisionsMap[selectedSemester].forEach(function(division) {
-                const option = document.createElement('option');
-                option.value = division;
-                option.textContent = division;
-                if (division === currentSelection) {
-                    option.selected = true;
-                }
-                divisionSelect.appendChild(option);
-            });
+            optionsList = divisionsMap[selectedSemester];
+        } else {
+            // When no semester is selected yet, show all active divisions
+            optionsList = Object.values(divisionsMap).flat().filter((v, i, a) => a.indexOf(v) === i);
         }
+
+        optionsList.forEach(function(division) {
+            const option = document.createElement('option');
+            option.value = division;
+            option.textContent = division;
+            if (division === currentSelection) {
+                option.selected = true;
+            }
+            divisionSelect.appendChild(option);
+        });
     }
 
     document.addEventListener('DOMContentLoaded', function() {

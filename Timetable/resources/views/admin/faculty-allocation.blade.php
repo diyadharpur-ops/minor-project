@@ -193,4 +193,43 @@
         </div>
     </div>
 </div>
+<script>
+    const divisionsMap = @json($divisionsMap ?? []);
+    const oldDivision = "{{ request('division', '') }}";
+
+    function updateFacultyDivisions() {
+        const semesterSelect = document.getElementById('semester');
+        const divisionSelect = document.getElementById('division');
+        if (!semesterSelect || !divisionSelect) return;
+
+        const selectedSemester = semesterSelect.value;
+        const currentSelection = divisionSelect.value || oldDivision;
+
+        let optionsList = [];
+        if (selectedSemester && divisionsMap[selectedSemester]) {
+            optionsList = divisionsMap[selectedSemester];
+        } else {
+            optionsList = Object.values(divisionsMap).flat().filter((v, i, a) => a.indexOf(v) === i);
+        }
+
+        divisionSelect.innerHTML = '<option value="">Select Class / Division</option>';
+        optionsList.forEach(function(division) {
+            const option = document.createElement('option');
+            option.value = division;
+            option.textContent = division;
+            if (division === currentSelection) {
+                option.selected = true;
+            }
+            divisionSelect.appendChild(option);
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const divisionSelect = document.getElementById('division');
+        if (divisionSelect && divisionSelect.options.length <= 1) {
+            updateFacultyDivisions();
+        }
+    });
+</script>
 @endsection
+

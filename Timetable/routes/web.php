@@ -257,7 +257,8 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
         return redirect('/admin/login');
     }
 
-    $semesters = Subject::select('semester')->distinct()->pluck('semester')->filter()->values();
+    // Only semesters that have subjects in the DB
+    $semesters = Subject::select('semester')->distinct()->pluck('semester')->filter()->sort()->values();
 
     $departments = Department::all();
 
@@ -307,16 +308,13 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
         ];
     }
 
-    $dbDivisions = Division::all()->groupBy('semester');
-    $divisionsMap = [];
-    foreach ($semesters as $sem) {
-        if ($dbDivisions->has($sem) && $dbDivisions->get($sem)->isNotEmpty()) {
-            $divisionsMap[$sem] = $dbDivisions->get($sem)->where('is_active', true)->pluck('name')->values()->toArray();
-        } else {
-            $divisionsMap[$sem] = ['A', 'B', 'C'];
-        }
+    $divisionsMap = Division::getDivisionsMap($semesters);
+    $selectedSem = (string) request('semester');
+    if (filled($selectedSem) && isset($divisionsMap[$selectedSem])) {
+        $divisions = collect($divisionsMap[$selectedSem]);
+    } else {
+        $divisions = collect(Division::getAllActiveDivisions($semesters));
     }
-    $divisions = collect($divisionsMap)->flatten()->unique()->sort()->values();
 
     return view('admin.timetable.index', [
         'departments' => $departments,
@@ -345,21 +343,17 @@ Route::get('/admin/timetable/builder', function (Request $request) {
     $timeSlots = ['10:30-11:30', '11:30-12:30', '01:00-02:00', '02:00-03:00', '03:10-04:10', '04:10-05:10'];
     $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-    $semesters = Subject::whereNotNull('semester')->distinct()->pluck('semester')->toArray();
-    if (empty($semesters)) {
-        $semesters = ['1','2','3','4','5','6','7','8'];
-    }
 
-    $dbDivisions = Division::all()->groupBy('semester');
-    $divisionsMap = [];
-    foreach ($semesters as $sem) {
-        if ($dbDivisions->has($sem) && $dbDivisions->get($sem)->isNotEmpty()) {
-            $divisionsMap[$sem] = $dbDivisions->get($sem)->where('is_active', true)->pluck('name')->values()->toArray();
-        } else {
-            $divisionsMap[$sem] = ['A', 'B', 'C'];
-        }
+    // Only semesters that have subjects in the DB
+    $semesters = Subject::whereNotNull('semester')->distinct()->pluck('semester')->sort()->values();
+
+    $divisionsMap = Division::getDivisionsMap($semesters);
+    $selectedSem = (string) $request->input('semester');
+    if (filled($selectedSem) && isset($divisionsMap[$selectedSem])) {
+        $divisions = collect($divisionsMap[$selectedSem]);
+    } else {
+        $divisions = collect(Division::getAllActiveDivisions($semesters));
     }
-    $divisions = collect($divisionsMap)->flatten()->unique()->sort()->values();
 
     $entries = collect([]);
     if ($request->has('department_id') && $request->has('semester') && $request->has('division')) {
@@ -1315,17 +1309,19 @@ Route::get('/admin/faculty-allocation', function (Request $request, FacultyAlloc
 
     $departmentRows = Department::orderBy('name')->get();
 
-    $semesterOptions = $allBatches
-        ->when(filled($departmentId), fn ($collection) => $collection->filter(fn (array $batch): bool => (int) $batch['department_id'] === (int) $departmentId))
+    // Only semesters that have subjects in Manage Subjects
+    $semesterOptions = Subject::query()
+        ->when(filled($departmentId), fn ($query) => $query->where('department_id', $departmentId))
+        ->whereNotNull('semester')
+        ->distinct()
+        ->orderBy('semester')
         ->pluck('semester')
-        ->filter(fn ($value) => filled($value))
-        ->unique()
-        ->sortBy(fn ($value) => (int) $value)
+        ->filter()
         ->values();
 
     if ($semesterOptions->isEmpty()) {
         $semesterOptions = Subject::query()
-            ->when(filled($departmentId), fn ($query) => $query->where('department_id', $departmentId))
+            ->whereNotNull('semester')
             ->distinct()
             ->orderBy('semester')
             ->pluck('semester')
@@ -1333,14 +1329,12 @@ Route::get('/admin/faculty-allocation', function (Request $request, FacultyAlloc
             ->values();
     }
 
-    $divisionOptions = collect();
-    if (filled($departmentId) && filled($semester)) {
-        $dbDivisions = Division::where('semester', $semester)->get();
-        if ($dbDivisions->isEmpty()) {
-            $divisionOptions = collect(['A', 'B', 'C']);
-        } else {
-            $divisionOptions = $dbDivisions->where('is_active', true)->pluck('name')->values();
-        }
+    $divisionsMap = Division::getDivisionsMap($semesterOptions);
+
+    if (filled($semester) && isset($divisionsMap[(string) $semester])) {
+        $divisionOptions = collect($divisionsMap[(string) $semester]);
+    } else {
+        $divisionOptions = collect(Division::getAllActiveDivisions($semesterOptions));
     }
 
     $allocations = collect();
@@ -1363,6 +1357,7 @@ Route::get('/admin/faculty-allocation', function (Request $request, FacultyAlloc
         'departments' => $departmentRows,
         'semesterOptions' => $semesterOptions,
         'divisionOptions' => $divisionOptions,
+        'divisionsMap' => $divisionsMap,
         'selectedDepartmentId' => $departmentId,
         'selectedSemester' => $semester,
         'selectedDivision' => $division,
@@ -1427,23 +1422,22 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     $batches = $facultyAllocationService->batches();
 
     $departments = Department::orderBy('name')->get();
+
+    // Only semesters that have subjects in the DB
     $semesters = Subject::query()
         ->whereNotNull('semester')
         ->select('semester')
         ->distinct()
         ->orderBy('semester')
         ->pluck('semester');
-        
-    $dbDivisions = Division::all()->groupBy('semester');
-    $divisionsMap = [];
-    foreach ($semesters as $sem) {
-        if ($dbDivisions->has($sem) && $dbDivisions->get($sem)->isNotEmpty()) {
-            $divisionsMap[$sem] = $dbDivisions->get($sem)->where('is_active', true)->pluck('name')->values()->toArray();
-        } else {
-            $divisionsMap[$sem] = ['A', 'B', 'C'];
-        }
+
+    $divisionsMap = Division::getDivisionsMap($semesters);
+    $selectedSem = (string) $request->input('semester');
+    if (filled($selectedSem) && isset($divisionsMap[$selectedSem])) {
+        $divisions = collect($divisionsMap[$selectedSem]);
+    } else {
+        $divisions = collect(Division::getAllActiveDivisions($semesters));
     }
-    $divisions = collect($divisionsMap)->flatten()->unique()->sort()->values();
 
     $academicYears = TimetableEntry::query()
         ->whereNotNull('academic_year')
@@ -1452,6 +1446,15 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
         ->distinct()
         ->orderByDesc('academic_year')
         ->pluck('academic_year');
+    // Fallback: add current and next academic years if no timetable entries exist
+    if ($academicYears->isEmpty()) {
+        $currentYear = (int) date('Y');
+        $academicYears = collect([
+            ($currentYear - 1) . '-' . $currentYear,
+            $currentYear . '-' . ($currentYear + 1),
+            ($currentYear + 1) . '-' . ($currentYear + 2),
+        ]);
+    }
     $terms = TimetableEntry::query()
         ->whereNotNull('term')
         ->where('term', '!=', '')
@@ -1459,6 +1462,10 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
         ->distinct()
         ->orderBy('term')
         ->pluck('term');
+    // Fallback terms
+    if ($terms->isEmpty()) {
+        $terms = collect(['Odd', 'Even']);
+    }
 
     if ($request->isMethod('post')) {
         if ($request->input('form_type') === 'filtered-auto-allocate') {
