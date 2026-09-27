@@ -287,12 +287,17 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
         // format to match index.blade.php expectations
         $sessions = [];
         foreach ($entries as $entry) {
+            $roomName = $entry->classroom ? $entry->classroom->room_number : '';
+            if ($entry->notes && str_starts_with($entry->notes, 'Room2:')) {
+                $roomName .= ' + ' . substr($entry->notes, 6);
+            }
+
             $sessions[] = [
                 'day' => $entry->day,
                 'time_slot' => $entry->time_slot,
                 'subject' => $entry->subject ? $entry->subject->name : '',
                 'faculty' => $entry->faculty ? $entry->faculty->name : '',
-                'room' => $entry->classroom ? $entry->classroom->room_number : '',
+                'room' => $roomName,
                 'type' => $entry->lecture_type,
                 'duration' => $entry->duration,
             ];

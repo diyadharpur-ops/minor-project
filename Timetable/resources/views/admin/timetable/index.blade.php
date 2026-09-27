@@ -15,7 +15,10 @@
 
     <div class="page-card d-print-none" style="margin-bottom: 20px;">
         @if(session('status'))
-            <div class="alert alert-success">{{ session('status') }}</div>
+            <div class="alert alert-success" style="background-color: #d1e7dd; color: #0f5132; padding: 15px; border-radius: 4px; border: 1px solid #badbcc; font-weight: bold; margin-bottom: 15px;">{{ session('status') }}</div>
+        @endif
+        @if(session('error'))
+            <div class="alert alert-danger" style="background-color: #f8d7da; color: #842029; padding: 15px; border-radius: 4px; border: 1px solid #f5c2c7; font-weight: bold; margin-bottom: 15px;">{{ session('error') }}</div>
         @endif
         
         <form method="POST" action="/admin/timetable" style="display: flex; gap: 10px; align-items: flex-end;">
@@ -315,7 +318,12 @@
                                 @endphp
                                 <td rowspan="{{ $rs }}">
                                     @if ($entry)
-                                        <span class="subject-name">{{ strtoupper($entry['subject']) }}</span>
+                                        <span class="subject-name">
+                                            {{ strtoupper($entry['subject']) }}
+                                            @if(strcasecmp($entry['type'], 'Tutorial') === 0)
+                                                <sup>^</sup>
+                                            @endif
+                                        </span>
                                         <span class="faculty-name">{{ $entry['faculty'] }}</span>
                                         <span class="room-type">{{ $entry['room'] }} ({{ strtoupper($entry['type']) }})</span>
                                     @else

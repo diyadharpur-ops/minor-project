@@ -9,6 +9,8 @@ use App\Models\Faculty;
 use App\Models\Notification;
 use App\Models\Subject;
 use App\Models\TimetableEntry;
+use Illuminate\Support\Facades\DB;
+use App\Models\RoomAllocation;
 use Exception;
 
 class TimetableGenerator
@@ -90,24 +92,25 @@ class TimetableGenerator
             }
         }
 
-        $getFaculty = function ($subject) use ($allFaculty) {
-            if ($allFaculty->isEmpty()) {
-                return null;
+        // Load Room Allocations
+        $roomAllocations = RoomAllocation::where('department_id', $deptId)
+            ->where('semester', $semester)
+            ->get();
+
+        $getFaculty = function ($subject) use ($allFaculty, $roomAllocations) {
+            $alloc = $roomAllocations->firstWhere('subject_id', $subject->id);
+            if ($alloc && $alloc->faculty_id) {
+                return $allFaculty->firstWhere('id', $alloc->faculty_id);
             }
+            if ($allFaculty->isEmpty()) return null;
             if ($subject->faculty_name) {
                 $f = $allFaculty->first(fn ($fac) => stripos($fac->name, $subject->faculty_name) !== false);
-                if ($f) {
-                    return $f;
-                }
+                if ($f) return $f;
             }
             $f = $allFaculty->first(function ($fac) use ($subject) {
                 return $fac->subjects && stripos($fac->subjects, $subject->name) !== false;
             });
-            if ($f) {
-                return $f;
-            }
-
-            return $allFaculty->random();
+            return $f ?: $allFaculty->random();
         };
 
         // Create Blocks
@@ -116,14 +119,24 @@ class TimetableGenerator
 
         foreach ($subjects as $subject) {
             $faculty = $getFaculty($subject);
-            $isPracticalSubject = stripos($subject->subject_type ?? '', 'practical') !== false || stripos($subject->subject_type ?? '', 'lab') !== false;
+            
+            $lectureCount = (int) ($subject->lecture_credit ?? 0);
+            $labCount = (int) ($subject->lab_credit ?? 0);
+            $tutorialCount = (int) ($subject->tutorial_credit ?? 0);
 
-            $theoryCount = $isPracticalSubject ? 0 : ($subject->credit ?? 1);
-            $practicalCount = $isPracticalSubject ? ($subject->credit ?? 1) : 0;
+            // Fallback for older data without detailed credits
+            if ($lectureCount == 0 && $labCount == 0 && $tutorialCount == 0 && ($subject->credit ?? 0) > 0) {
+                $isPracticalSubject = stripos($subject->subject_type ?? '', 'practical') !== false || stripos($subject->subject_type ?? '', 'lab') !== false;
+                if ($isPracticalSubject) {
+                    $labCount = (int) ($subject->credit);
+                } else {
+                    $lectureCount = (int) ($subject->credit);
+                }
+            }
 
-            for ($i = 0; $i < $theoryCount; $i++) {
+            for ($i = 0; $i < $lectureCount; $i++) {
                 $blocks->push((object) [
-                    'type' => 'Theory',
+                    'type' => 'Lecture',
                     'duration' => 1,
                     'subject' => $subject,
                     'faculty' => $faculty,
@@ -131,7 +144,7 @@ class TimetableGenerator
                 $totalHours += 1;
             }
 
-            for ($i = 0; $i < $practicalCount; $i++) {
+            for ($i = 0; $i < $labCount; $i++) {
                 $blocks->push((object) [
                     'type' => 'Practical',
                     'duration' => 2,
@@ -139,6 +152,16 @@ class TimetableGenerator
                     'faculty' => $faculty,
                 ]);
                 $totalHours += 2;
+            }
+            
+            for ($i = 0; $i < $tutorialCount; $i++) {
+                $blocks->push((object) [
+                    'type' => 'Tutorial',
+                    'duration' => 1,
+                    'subject' => $subject,
+                    'faculty' => $faculty,
+                ]);
+                $totalHours += 1;
             }
         }
 
@@ -164,7 +187,7 @@ class TimetableGenerator
 
             // Important: Place 2-hour Practicals first so they don't get blocked by 1-hour gaps near breaks
             $practicals = $blocks->where('type', 'Practical')->shuffle();
-            $theories = $blocks->where('type', 'Theory')->shuffle();
+            $theories = $blocks->whereIn('type', ['Lecture', 'Tutorial'])->shuffle();
             $orderedBlocks = $practicals->merge($theories);
 
             foreach ($orderedBlocks as $block) {
@@ -184,11 +207,11 @@ class TimetableGenerator
                         continue;
                     }
 
-                    // Rule 1 & 2 Check: Theory & Lab of same subject MUST be on DIFFERENT days
-                    if ($block->type == 'Theory' && ! empty($subjectOnDay[$block->subject->name][$day]['Practical'])) {
+                    // Rule 1 & 2 Check: Lecture/Tutorial & Lab of same subject MUST be on DIFFERENT days
+                    if (in_array($block->type, ['Lecture', 'Tutorial']) && ! empty($subjectOnDay[$block->subject->name][$day]['Practical'])) {
                         continue;
                     }
-                    if ($block->type == 'Practical' && ! empty($subjectOnDay[$block->subject->name][$day]['Theory'])) {
+                    if ($block->type == 'Practical' && (! empty($subjectOnDay[$block->subject->name][$day]['Lecture']) || ! empty($subjectOnDay[$block->subject->name][$day]['Tutorial']))) {
                         continue;
                     }
 
@@ -215,22 +238,48 @@ class TimetableGenerator
 
                     // Find Available Room
                     $availableRoomId = null;
-                    $roomsList = ($block->type == 'Practical') ? $labRooms : $lectureRooms;
-                    foreach ($roomsList->shuffle() as $room) {
+                    $secondRoomNotes = null;
+                    
+                    // Check if there is a pre-allocated room
+                    $alloc = $roomAllocations->firstWhere('subject_id', $block->subject->id);
+                    if ($alloc && $alloc->classroom_id) {
                         $roomConflict = false;
                         foreach ($slots as $s) {
-                            if (! empty($roomOccupiedLocal[$room->id][$day][$s])) {
+                            if (! empty($roomOccupiedLocal[$alloc->classroom_id][$day][$s])) {
+                                $roomConflict = true;
+                                break;
+                            }
+                            if ($alloc->second_classroom_id && ! empty($roomOccupiedLocal[$alloc->second_classroom_id][$day][$s])) {
                                 $roomConflict = true;
                                 break;
                             }
                         }
                         if (! $roomConflict) {
-                            $availableRoomId = $room->id;
-                            break;
+                            $availableRoomId = $alloc->classroom_id;
+                            if ($alloc->secondClassroom) {
+                                $secondRoomNotes = 'Room2:' . $alloc->secondClassroom->room_number;
+                            }
                         }
                     }
-                    if (! $availableRoomId && $roomsList->isNotEmpty()) {
-                        continue;
+
+                    if (! $availableRoomId) {
+                        $roomsList = ($block->type == 'Practical') ? $labRooms : $lectureRooms;
+                        foreach ($roomsList->shuffle() as $room) {
+                            $roomConflict = false;
+                            foreach ($slots as $s) {
+                                if (! empty($roomOccupiedLocal[$room->id][$day][$s])) {
+                                    $roomConflict = true;
+                                    break;
+                                }
+                            }
+                            if (! $roomConflict) {
+                                $availableRoomId = $room->id;
+                                break;
+                            }
+                        }
+                        if (! $availableRoomId && $roomsList->isNotEmpty()) {
+                            continue;
+                        }
                     }
 
                     // Calculate Penalty to pick the most balanced day
@@ -257,6 +306,7 @@ class TimetableGenerator
                         'ns' => $ns,
                         'slots' => $slots,
                         'room_id' => $availableRoomId,
+                        'notes' => $secondRoomNotes,
                         'penalty' => $penalty,
                     ];
                 }
@@ -273,6 +323,7 @@ class TimetableGenerator
                 $day = $best['day'];
                 $slots = $best['slots'];
                 $roomId = $best['room_id'];
+                $notes = $best['notes'];
                 $facultyId = $block->faculty ? $block->faculty->id : null;
 
                 $localAssignments[] = [
@@ -288,7 +339,7 @@ class TimetableGenerator
                     'classroom_id' => $roomId,
                     'lecture_type' => $block->type,
                     'duration' => $block->duration,
-                    'notes' => null,
+                    'notes' => $notes,
                 ];
 
                 // Update constraints
@@ -319,17 +370,21 @@ class TimetableGenerator
             }
         }
 
-        // Delete existing entries for this class before saving new ones
-        TimetableEntry::where([
-            'department_id' => $deptId,
-            'semester' => $semester,
-            'division' => $division,
-        ])->delete();
+        DB::transaction(function () use ($deptId, $semester, $division, $academicYear, $term, $bestSchedule, $blocks, $bestPlacedCount) {
+            // Delete existing entries for this class before saving new ones
+            TimetableEntry::where([
+                'department_id' => $deptId,
+                'semester' => $semester,
+                'division' => $division,
+                'academic_year' => $academicYear,
+                'term' => $term,
+            ])->delete();
 
-        // Save the best timetable we found
-        foreach ($bestSchedule as $a) {
-            TimetableEntry::create($a);
-        }
+            // Save the best timetable we found
+            foreach ($bestSchedule as $a) {
+                TimetableEntry::create($a);
+            }
+        });
 
         $dept = Department::find($deptId);
         if ($dept) {
