@@ -190,6 +190,103 @@ test('admin can select class A, B, or C directly from the subject form', functio
         ->and($subject->weekly_hours)->toBe(6);
 });
 
+test('subject class, division, and tutorial selections persist independently through editing and deletion', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+        'description' => 'Computer Science Department',
+    ]);
+    $session = ['admin.auth' => ['name' => 'Admin User', 'email' => 'admin@example.com']];
+
+    $this->withSession($session)->post('/admin/subjects', [
+        'name' => 'Distributed Systems',
+        'subject_code' => 'CS501',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+        'selection_groups_present' => 1,
+        'class_selections' => ['A', 'C'],
+        'division_selections' => ['A1', 'C4'],
+        'tutorial_selections' => ['AT2', 'CT1'],
+    ])->assertRedirect('/admin/subjects');
+
+    $subject = Subject::where('subject_code', 'CS501')->firstOrFail();
+    expect($subject->class_selections)->toBe(['A', 'C'])
+        ->and($subject->division_selections)->toBe(['A1', 'C4'])
+        ->and($subject->tutorial_selections)->toBe(['AT2', 'CT1']);
+
+    $this->withSession($session)
+        ->get('/admin/subjects/'.$subject->id.'/edit')
+        ->assertOk()
+        ->assertSee('name="class_selections[]" value="A" checked', false)
+        ->assertSee('name="division_selections[]" value="A1" checked', false)
+        ->assertSee('name="tutorial_selections[]" value="AT2" checked', false);
+
+    $this->withSession($session)->post('/admin/subjects/'.$subject->id, [
+        'name' => 'Distributed Systems',
+        'subject_code' => 'CS501',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+        'selection_groups_present' => 1,
+        'class_selections' => ['B'],
+        'division_selections' => ['B4'],
+        'tutorial_selections' => ['BT3'],
+    ])->assertRedirect('/admin/subjects');
+
+    $subject->refresh();
+    expect($subject->class_selections)->toBe(['B'])
+        ->and($subject->division_selections)->toBe(['B4'])
+        ->and($subject->tutorial_selections)->toBe(['BT3']);
+
+    Division::create(['name' => 'B', 'semester' => '5', 'is_active' => true]);
+
+    $this->withSession($session)->get('/admin/subjects')
+        ->assertOk()
+        ->assertSee('B4')
+        ->assertSee('BT3')
+        ->assertSee('Distributed Systems')
+        ->assertSee('Per Class Weekly Hours: 5 Hours')
+        ->assertSee('Total Weekly Hours: 5 Hours');
+
+    $recordPath = $subject->folder_path;
+    $this->withSession($session)
+        ->post('/admin/subjects/'.$subject->id.'/delete')
+        ->assertRedirect('/admin/subjects');
+
+    $this->assertDatabaseMissing('subjects', ['id' => $subject->id]);
+    expect(Storage::disk('local')->exists($recordPath))->toBeFalse();
+});
+
+test('subject selections reject children from classes that were not selected', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+        'description' => 'Computer Science Department',
+    ]);
+
+    $this->from('/admin/subjects/create')
+        ->withSession(['admin.auth' => ['name' => 'Admin User', 'email' => 'admin@example.com']])
+        ->post('/admin/subjects', [
+            'name' => 'Secure Programming',
+            'subject_code' => 'CS502',
+            'semester' => '5',
+            'department_id' => $department->id,
+            'lecture_credit' => 3,
+            'lab_credit' => 0,
+            'selection_groups_present' => 1,
+            'class_selections' => ['A'],
+            'division_selections' => ['B1'],
+            'tutorial_selections' => ['AT1'],
+        ])
+        ->assertRedirect('/admin/subjects/create')
+        ->assertSessionHasErrors('division_selections');
+
+    $this->assertDatabaseMissing('subjects', ['subject_code' => 'CS502']);
+});
+
 test('subject management groups only by semester and ignores legacy divisions', function () {
     $department = Department::create([
         'name' => 'Computer Engineering',

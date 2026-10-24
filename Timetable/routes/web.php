@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 Route::get('/', function () {
     return view('home');
@@ -289,7 +290,7 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
         foreach ($entries as $entry) {
             $roomName = $entry->classroom ? $entry->classroom->room_number : '';
             if ($entry->notes && str_starts_with($entry->notes, 'Room2:')) {
-                $roomName .= ' + ' . substr($entry->notes, 6);
+                $roomName .= ' + '.substr($entry->notes, 6);
             }
 
             $sessions[] = [
@@ -347,7 +348,6 @@ Route::get('/admin/timetable/builder', function (Request $request) {
 
     $timeSlots = ['10:30-11:30', '11:30-12:30', '01:00-02:00', '02:00-03:00', '03:10-04:10', '04:10-05:10'];
     $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
 
     // Only semesters that have subjects in the DB
     $semesters = Subject::whereNotNull('semester')->distinct()->pluck('semester')->sort()->values();
@@ -928,19 +928,19 @@ Route::post('/admin/divisions/toggle', function (Request $request) {
     if (! session('admin.auth')) {
         return response()->json(['error' => 'Unauthorized'], 401);
     }
-    
-    $semester = $request->input('semester');
-    $division = $request->input('division');
-    $isActive = $request->boolean('is_active');
-    
-    if ($semester && $division) {
-        Division::updateOrCreate(
-            ['name' => $division, 'semester' => $semester],
-            ['is_active' => $isActive]
-        );
-        return response()->json(['success' => true]);
-    }
-    return response()->json(['success' => false], 400);
+
+    $data = $request->validate([
+        'semester' => 'required|string|exists:subjects,semester',
+        'division' => 'required|in:A,B,C',
+        'is_active' => 'required|boolean',
+    ]);
+
+    Division::updateOrCreate(
+        ['name' => $data['division'], 'semester' => $data['semester']],
+        ['is_active' => $data['is_active']],
+    );
+
+    return response()->json(['success' => true]);
 });
 
 Route::get('/admin/subjects', function (Request $request) {
@@ -953,32 +953,62 @@ Route::get('/admin/subjects', function (Request $request) {
     $semesterWeeklyHours = $subjects
         ->groupBy('semester')
         ->map(function ($semesterSubjects, $semester) {
-            $divisions = Division::query()
+            $storedDivisions = Division::query()
                 ->where('semester', $semester)
+                ->whereIn('name', ['A', 'B', 'C'])
                 ->orderBy('name')
-                ->get();
-            
-            $defaultNames = ['A', 'B', 'C'];
-            $existingNames = $divisions->pluck('name')->toArray();
-            
-            foreach ($defaultNames as $name) {
-                if (!in_array($name, $existingNames)) {
-                    $divisions->push((object) ['name' => $name, 'is_active' => true]);
-                }
-            }
-            
-            $divisions = $divisions->sortBy('name')->values();
+                ->get()
+                ->keyBy('name');
+            $classOptions = ['A', 'B', 'C'];
+            $divisions = collect($classOptions)->map(function (string $name) use ($storedDivisions) {
+                return $storedDivisions->get($name) ?? (object) [
+                    'name' => $name,
+                    'is_active' => false,
+                ];
+            });
 
-            $perClassWeeklyHours = (int) $semesterSubjects->sum('weekly_hours');
-            $selectedClasses = collect($divisions)->filter(fn($d) => $d->is_active ?? true)->pluck('name')->all();
+            $selectedClasses = $divisions
+                ->filter(fn ($division) => (bool) $division->is_active)
+                ->pluck('name')
+                ->all();
+            $classHours = collect($classOptions)->mapWithKeys(function (string $class) use ($semesterSubjects): array {
+                $hours = $semesterSubjects->sum(function (Subject $subject) use ($class): int {
+                    $subjectClasses = $subject->class_selections;
+
+                    if ($subjectClasses === null) {
+                        $subjectClasses = $subject->division?->name
+                            ? [$subject->division->name]
+                            : ['A', 'B', 'C'];
+                    }
+
+                    return in_array($class, $subjectClasses, true) ? $subject->weekly_hours : 0;
+                });
+
+                return [$class => (int) $hours];
+            });
             $totalClasses = count($selectedClasses);
+            $totalHours = (int) $classHours->only($selectedClasses)->sum();
+
+            $divisionSelections = $semesterSubjects
+                ->flatMap(fn (Subject $subject) => $subject->division_selections ?? [])
+                ->unique()
+                ->values()
+                ->all();
+            $tutorialSelections = $semesterSubjects
+                ->flatMap(fn (Subject $subject) => $subject->tutorial_selections ?? [])
+                ->unique()
+                ->values()
+                ->all();
 
             return [
-                'per_class_hours' => $perClassWeeklyHours,
+                'per_class_hours' => $totalClasses > 0 ? $totalHours / $totalClasses : 0,
+                'class_hours' => $classHours->all(),
                 'divisions' => $divisions,
                 'selected_classes' => $selectedClasses,
                 'total_classes' => $totalClasses,
-                'total_hours' => $perClassWeeklyHours * $totalClasses,
+                'total_hours' => $totalHours,
+                'division_selections' => $divisionSelections,
+                'tutorial_selections' => $tutorialSelections,
             ];
         })
         ->sortKeys(SORT_NATURAL);
@@ -1018,9 +1048,11 @@ Route::get('/admin/subjects/create', function () {
         return redirect('/admin/login');
     }
 
-    $semesters = collect(range(1, 6))
-        ->merge(Subject::query()->distinct()->orderBy('semester')->pluck('semester'))
-        ->unique()
+    $semesters = Subject::query()
+        ->whereNotNull('semester')
+        ->distinct()
+        ->orderBy('semester')
+        ->pluck('semester')
         ->sort(SORT_NATURAL)
         ->values();
 
@@ -1035,14 +1067,10 @@ Route::get('/admin/subjects/create', function () {
     ]);
 });
 
-Route::post('/admin/subjects', function (Request $request) {
-    if (! session('admin.auth')) {
-        return redirect('/admin/login');
-    }
-
+$validateSubjectData = function (Request $request, ?Subject $subject = null): array {
     $data = $request->validate([
         'name' => 'required|string|max:255',
-        'subject_code' => 'required|string|max:50|unique:subjects,subject_code',
+        'subject_code' => ['required', 'string', 'max:50', Rule::unique('subjects', 'subject_code')->ignore($subject?->id)],
         'semester' => 'required|string|max:20',
         'division' => 'nullable|in:A,B,C',
         'division_id' => [
@@ -1050,23 +1078,92 @@ Route::post('/admin/subjects', function (Request $request) {
             Rule::exists('divisions', 'id')->where(fn ($query) => $query->where('semester', $request->input('semester'))),
         ],
         'department_id' => 'required|exists:departments,id',
-        'subject_type' => 'required|in:Lecture,Lab,Tutorial',
+        'subject_type' => 'nullable|in:Lecture,Lab,Tutorial',
         'lecture_credit' => 'required|integer|min:0|max:10',
         'lab_credit' => 'required|integer|min:0|max:10',
         'tutorial_credit' => 'nullable|integer|min:0|max:10',
+        'selection_groups_present' => 'sometimes|boolean',
+        'class_selections' => 'sometimes|array',
+        'class_selections.*' => ['required', 'string', 'distinct', Rule::in(['A', 'B', 'C'])],
+        'division_selections' => 'sometimes|array',
+        'division_selections.*' => ['required', 'string', 'distinct', Rule::in(['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', 'B4', 'C1', 'C2', 'C3', 'C4'])],
+        'tutorial_selections' => 'sometimes|array',
+        'tutorial_selections.*' => ['required', 'string', 'distinct', Rule::in(['AT1', 'AT2', 'AT3', 'AT4', 'BT1', 'BT2', 'BT3', 'BT4', 'CT1', 'CT2', 'CT3', 'CT4'])],
     ]);
 
-    $data['tutorial_credit'] = $request->filled('tutorial_credit') ? (int) $request->tutorial_credit : null;
-    $divisionName = $request->input('division');
+    $classSelections = $data['class_selections'] ?? null;
+    $divisionSelections = $data['division_selections'] ?? null;
+    $tutorialSelections = $data['tutorial_selections'] ?? null;
 
-    if (! $divisionName && $request->filled('division_id')) {
-        $divisionName = Division::find($request->input('division_id'))?->name;
+    if ($request->boolean('selection_groups_present')) {
+        $classSelections ??= [];
+        $divisionSelections ??= [];
+        $tutorialSelections ??= [];
     }
 
-    $data['division_id'] = $divisionName
-        ? Division::firstOrCreate(['name' => $divisionName, 'semester' => $data['semester']])->id
-        : null;
-    unset($data['division']);
+    if ($classSelections === null) {
+        $divisionName = $data['division'] ?? null;
+
+        if (! $divisionName && ! empty($data['division_id'])) {
+            $divisionName = Division::find($data['division_id'])?->name;
+        }
+
+        if (in_array($divisionName, ['A', 'B', 'C'], true)) {
+            $classSelections = [$divisionName];
+        }
+    }
+
+    foreach ($divisionSelections ?? [] as $divisionSelection) {
+        if (! in_array($divisionSelection[0], $classSelections ?? [], true)) {
+            throw ValidationException::withMessages([
+                'division_selections' => 'Choose the matching class before selecting a division.',
+            ]);
+        }
+    }
+
+    foreach ($tutorialSelections ?? [] as $tutorialSelection) {
+        if (! in_array($tutorialSelection[0], $classSelections ?? [], true)) {
+            throw ValidationException::withMessages([
+                'tutorial_selections' => 'Choose the matching class before selecting a tutorial.',
+            ]);
+        }
+    }
+
+    if ($request->boolean('selection_groups_present') || array_key_exists('class_selections', $data)) {
+        $legacyClass = count($classSelections ?? []) === 1 ? $classSelections[0] : null;
+        $divisionId = $legacyClass
+            ? Division::firstOrCreate(['name' => $legacyClass, 'semester' => $data['semester']])->id
+            : null;
+    } else {
+        $legacyClass = $data['division'] ?? null;
+        $divisionId = $data['division_id'] ?? null;
+
+        if (! $legacyClass && $divisionId) {
+            $legacyClass = Division::find($divisionId)?->name;
+        }
+
+        if (! $divisionId && $legacyClass) {
+            $divisionId = Division::firstOrCreate(['name' => $legacyClass, 'semester' => $data['semester']])->id;
+        }
+    }
+
+    unset($data['division'], $data['division_id'], $data['selection_groups_present']);
+    $data['subject_type'] ??= 'Lecture';
+    $data['class_selections'] = $classSelections;
+    $data['division_selections'] = $divisionSelections;
+    $data['tutorial_selections'] = $tutorialSelections;
+    $data['division_id'] = $divisionId;
+    $data['tutorial_credit'] = $request->filled('tutorial_credit') ? (int) $request->tutorial_credit : null;
+
+    return $data;
+};
+
+Route::post('/admin/subjects', function (Request $request) use ($validateSubjectData) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $data = $validateSubjectData($request);
 
     $subject = Subject::create($data);
 
@@ -1084,6 +1181,9 @@ Route::post('/admin/subjects', function (Request $request) {
             'lecture_credit' => $subject->lecture_credit,
             'lab_credit' => $subject->lab_credit,
             'tutorial_credit' => $subject->tutorial_credit,
+            'class_selections' => $subject->class_selections,
+            'division_selections' => $subject->division_selections,
+            'tutorial_selections' => $subject->tutorial_selections,
         ], JSON_PRETTY_PRINT));
         $subject->update(['folder_path' => $filePath]);
     }
@@ -1096,12 +1196,14 @@ Route::get('/admin/subjects/{id}/edit', function ($id) {
         return redirect('/admin/login');
     }
 
-    $subject = Subject::with('department', 'faculty')->findOrFail($id);
-    $semesters = collect(range(1, 6))
-        ->merge(Subject::query()->distinct()->orderBy('semester')->pluck('semester'))
-        ->unique()
-        ->sort(SORT_NATURAL)
+    $subject = Subject::with('department', 'faculty', 'division')->findOrFail($id);
+    $semesters = Subject::query()
+        ->whereNotNull('semester')
+        ->distinct()
+        ->orderBy('semester')
+        ->pluck('semester')
         ->values();
+    $semesters = $semesters->push($subject->semester)->unique()->sort(SORT_NATURAL)->values();
 
     $departments = Department::orderBy('name')->get();
     $faculties = Faculty::orderBy('name')->get();
@@ -1115,40 +1217,14 @@ Route::get('/admin/subjects/{id}/edit', function ($id) {
     ]);
 });
 
-Route::post('/admin/subjects/{id}', function (Request $request, $id) {
+Route::post('/admin/subjects/{id}', function (Request $request, $id) use ($validateSubjectData) {
     if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
 
     $subject = Subject::findOrFail($id);
 
-    $data = $request->validate([
-        'name' => 'required|string|max:255',
-        'subject_code' => 'required|string|max:50|unique:subjects,subject_code,'.$subject->id,
-        'semester' => 'required|string|max:20',
-        'division' => 'nullable|in:A,B,C',
-        'division_id' => [
-            'nullable',
-            Rule::exists('divisions', 'id')->where(fn ($query) => $query->where('semester', $request->input('semester'))),
-        ],
-        'department_id' => 'required|exists:departments,id',
-        'subject_type' => 'required|in:Lecture,Lab,Tutorial',
-        'lecture_credit' => 'required|integer|min:0|max:10',
-        'lab_credit' => 'required|integer|min:0|max:10',
-        'tutorial_credit' => 'nullable|integer|min:0|max:10',
-    ]);
-
-    $data['tutorial_credit'] = $request->filled('tutorial_credit') ? (int) $request->tutorial_credit : null;
-    $divisionName = $request->input('division');
-
-    if (! $divisionName && $request->filled('division_id')) {
-        $divisionName = Division::find($request->input('division_id'))?->name;
-    }
-
-    $data['division_id'] = $divisionName
-        ? Division::firstOrCreate(['name' => $divisionName, 'semester' => $data['semester']])->id
-        : null;
-    unset($data['division']);
+    $data = $validateSubjectData($request, $subject);
 
     $subject->update($data);
 
@@ -1171,6 +1247,9 @@ Route::post('/admin/subjects/{id}', function (Request $request, $id) {
             'lecture_credit' => $subject->lecture_credit,
             'lab_credit' => $subject->lab_credit,
             'tutorial_credit' => $subject->tutorial_credit,
+            'class_selections' => $subject->class_selections,
+            'division_selections' => $subject->division_selections,
+            'tutorial_selections' => $subject->tutorial_selections,
         ], JSON_PRETTY_PRINT));
         $subject->update(['folder_path' => $filePath]);
     }
@@ -1455,9 +1534,9 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     if ($academicYears->isEmpty()) {
         $currentYear = (int) date('Y');
         $academicYears = collect([
-            ($currentYear - 1) . '-' . $currentYear,
-            $currentYear . '-' . ($currentYear + 1),
-            ($currentYear + 1) . '-' . ($currentYear + 2),
+            ($currentYear - 1).'-'.$currentYear,
+            $currentYear.'-'.($currentYear + 1),
+            ($currentYear + 1).'-'.($currentYear + 2),
         ]);
     }
     $terms = TimetableEntry::query()

@@ -19,14 +19,37 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'lab_credit',
     'tutorial_credit',
     'folder_path',
+    'class_selections',
+    'division_selections',
+    'tutorial_selections',
 ])]
 class Subject extends Model
 {
+    protected function casts(): array
+    {
+        return [
+            'class_selections' => 'array',
+            'division_selections' => 'array',
+            'tutorial_selections' => 'array',
+        ];
+    }
+
     public function getWeeklyHoursAttribute(): int
     {
         return ((int) ($this->lecture_credit ?? 0))
             + ((int) ($this->lab_credit ?? 0) * 2)
             + ((int) ($this->tutorial_credit ?? 0));
+    }
+
+    public function getClassSelectionLabelAttribute(): string
+    {
+        if ($this->class_selections !== null) {
+            return $this->class_selections === []
+                ? 'No classes'
+                : implode(', ', $this->class_selections);
+        }
+
+        return $this->division?->name ?? 'All classes';
     }
 
     public function department(): BelongsTo

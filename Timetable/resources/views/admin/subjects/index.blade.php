@@ -108,6 +108,35 @@
             text-align: center;
             color: #6b7280;
         }
+        .selection-group {
+            margin-top: 10px;
+        }
+        .selection-group > strong {
+            display: block;
+            margin-bottom: 8px;
+        }
+        .selection-group-list {
+            display: grid;
+            gap: 8px;
+        }
+        .selection-group-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+        .selection-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            background: white;
+        }
+        .selection-group-row[hidden] {
+            display: none;
+        }
     </style>
 
     <div class="page-header">
@@ -152,7 +181,7 @@
                                 <td>{{ $subject->name }}</td>
                                 <td>{{ $subject->subject_code }}</td>
                                 <td>{{ $subject->semester }}</td>
-                                <td>{{ $subject->division?->name ?? 'All classes' }}</td>
+                                <td>{{ $subject->class_selection_label }}</td>
                                 <td>{{ $subject->department?->name ?? 'N/A' }}</td>
                                 <td>{{ $subject->lecture_credit ?? 0 }}</td>
                                 <td>{{ $subject->lab_credit ?? 0 }}</td>
@@ -184,86 +213,128 @@
                             <div class="semester-header expanded" onclick="toggleSemester(this)">
                                 📚 Semester {{ $semester }}
                             </div>
-                            <div class="semester-content">
-                                    @php
-                                        $semesterSummary = $semesterWeeklyHours->get($semester, [
-                                            'per_class_hours' => 0,
-                                            'selected_classes' => [],
-                                            'total_classes' => 0,
-                                            'total_hours' => 0,
-                                            'divisions' => collect(),
-                                        ]);
-                                        $selectedClasses = $semesterSummary['selected_classes'];
-                                    @endphp
-                                    <div
-                                        data-semester-summary="{{ $semester }}"
-                                        data-per-class-hours="{{ $semesterSummary['per_class_hours'] }}"
-                                        style="padding: 16px; border-bottom: 1px solid #e5e7eb; background: #fafafa;"
-                                    >
-                                        <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
-                                            <div>
-                                                <strong>Per Class Weekly Hours:</strong> {{ $semesterSummary['per_class_hours'] }} Hours
-                                            </div>
-                                            <div>
-                                                <strong>Selected Classes:</strong> <span data-field="selected-classes">{{ empty($selectedClasses) ? 'None' : implode(', ', $selectedClasses) }}</span>
-                                            </div>
-                                            <div>
-                                                <strong>Total Classes:</strong> <span data-field="total-classes">{{ $semesterSummary['total_classes'] }}</span>
-                                            </div>
+                            @php
+                                $semesterSummary = $semesterWeeklyHours->get($semester, [
+                                    'per_class_hours' => 0,
+                                    'selected_classes' => [],
+                                    'total_classes' => 0,
+                                    'total_hours' => 0,
+                                    'class_hours' => [],
+                                    'divisions' => collect(),
+                                    'division_selections' => [],
+                                    'tutorial_selections' => [],
+                                ]);
+                                $selectedClasses = $semesterSummary['selected_classes'];
+                            @endphp
+                            <div class="semester-content" data-semester-summary="{{ $semester }}">
+                                <div style="padding: 16px; border-bottom: 1px solid #e5e7eb; background: #fafafa;">
+                                    <div data-field="per-class-hours">
+                                        <strong>Per Class Weekly Hours:</strong> {{ $semesterSummary['per_class_hours'] }} Hours
+                                    </div>
+                                    <div class="selection-group">
+                                        <strong>Class Selection:</strong>
+                                        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                            @foreach ($semesterSummary['divisions'] as $division)
+                                                <label class="selection-chip">
+                                                    <input
+                                                        type="checkbox"
+                                                        class="division-checkbox"
+                                                        data-semester="{{ $semester }}"
+                                                        data-division="{{ $division->name }}"
+                                                        data-hours="{{ $semesterSummary['class_hours'][$division->name] ?? 0 }}"
+                                                        {{ ($division->is_active ?? false) ? 'checked' : '' }}
+                                                    >
+                                                    <span>{{ $division->name }}</span>
+                                                </label>
+                                            @endforeach
                                         </div>
-                                        <div style="margin-top: 12px;">
-                                            <strong>Class/Division Selection:</strong>
-                                            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
-                                                @foreach ($semesterSummary['divisions'] as $division)
-                                                    <label style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 999px; background: white;">
-                                                        <input type="checkbox" class="division-checkbox" data-semester="{{ $semester }}" data-division="{{ $division->name }}" {{ ($division->is_active ?? true) ? 'checked' : '' }}>
-                                                        <span>{{ $division->name }}</span>
-                                                    </label>
-                                                @endforeach
-                                            </div>
+                                    </div>
+                                    <div class="selection-group">
+                                        <strong>Division Selection:</strong>
+                                        <div class="selection-group-list">
+                                            @foreach (['A', 'B', 'C'] as $class)
+                                                <div class="selection-group-row" data-semester-group="{{ $semester }}" data-selection-class-group="{{ $class }}" {{ in_array($class, $selectedClasses, true) ? '' : 'hidden' }}>
+                                                    <strong>Class {{ $class }}</strong>
+                                                    @foreach (range(1, 4) as $number)
+                                                        @php $divisionSelection = $class.$number; @endphp
+                                                        <label class="selection-chip">
+                                                            <input type="checkbox" disabled {{ in_array($divisionSelection, $semesterSummary['division_selections'], true) ? 'checked' : '' }}>
+                                                            <span>{{ $divisionSelection }}</span>
+                                                        </label>
+                                                    @endforeach
+                                                </div>
+                                            @endforeach
                                         </div>
-                                        <div style="margin-top: 16px; font-size: 1.05rem; color: #111827;">
+                                    </div>
+                                    <div class="selection-group">
+                                        <strong>Tutorial Selection:</strong>
+                                        <div class="selection-group-list">
+                                            @foreach (['A', 'B', 'C'] as $class)
+                                                <div class="selection-group-row" data-semester-group="{{ $semester }}" data-selection-class-group="{{ $class }}" {{ in_array($class, $selectedClasses, true) ? '' : 'hidden' }}>
+                                                    <strong>Class {{ $class }}</strong>
+                                                    @foreach (range(1, 4) as $number)
+                                                        @php $tutorialSelection = $class.'T'.$number; @endphp
+                                                        <label class="selection-chip">
+                                                            <input type="checkbox" disabled {{ in_array($tutorialSelection, $semesterSummary['tutorial_selections'], true) ? 'checked' : '' }}>
+                                                            <span>{{ $tutorialSelection }}</span>
+                                                        </label>
+                                                    @endforeach
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                </div>
+                                <table class="subjects-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Subject Code</th>
+                                            <th>Semester</th>
+                                            <th>Class</th>
+                                            <th>Department</th>
+                                            <th>Lecture</th>
+                                            <th>Lab</th>
+                                            <th>Tutorial</th>
+                                            <th>Weekly Hours</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach ($subjects as $subject)
+                                            <tr>
+                                                <td>{{ $subject->name }}</td>
+                                                <td>{{ $subject->subject_code }}</td>
+                                                <td>{{ $subject->semester }}</td>
+                                                <td>{{ $subject->class_selection_label }}</td>
+                                                <td>{{ $subject->department?->name ?? 'N/A' }}</td>
+                                                <td>{{ $subject->lecture_credit ?? 0 }}</td>
+                                                <td>{{ $subject->lab_credit ?? 0 }}</td>
+                                                <td>{{ $subject->tutorial_credit ?? 0 }}</td>
+                                                <td>{{ $subject->weekly_hours }}</td>
+                                                <td class="actions">
+                                                    <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
+                                                    <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
+                                                        @csrf
+                                                        <button type="submit" class="btn btn-danger">Delete</button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                                <div style="padding: 14px 16px; background: #fafafa; border-top: 1px solid #e5e7eb;">
+                                    <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+                                        <div>
+                                            <strong>Selected Classes:</strong> <span data-field="selected-classes">{{ empty($selectedClasses) ? 'None' : implode(', ', $selectedClasses) }}</span>
+                                        </div>
+                                        <div>
+                                            <strong>Total Classes:</strong> <span data-field="total-classes">{{ $semesterSummary['total_classes'] }}</span>
+                                        </div>
+                                        <div style="font-size: 1.05rem; color: #111827;">
                                             <strong>Total Weekly Hours:</strong> <span data-field="total-hours">{{ $semesterSummary['total_hours'] }} Hours</span>
                                         </div>
                                     </div>
-                                    <table class="subjects-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Name</th>
-                                                <th>Subject Code</th>
-                                                <th>Semester</th>
-                                                <th>Class</th>
-                                                <th>Department</th>
-                                                <th>Lecture</th>
-                                                <th>Lab</th>
-                                                <th>Tutorial</th>
-                                                <th>Weekly Hours</th>
-                                                <th>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            @foreach ($subjects as $subject)
-                                                <tr>
-                                                    <td>{{ $subject->name }}</td>
-                                                    <td>{{ $subject->subject_code }}</td>
-                                                    <td>{{ $subject->semester }}</td>
-                                                    <td>{{ $subject->division?->name ?? 'All classes' }}</td>
-                                                    <td>{{ $subject->department?->name ?? 'N/A' }}</td>
-                                                    <td>{{ $subject->lecture_credit ?? 0 }}</td>
-                                                    <td>{{ $subject->lab_credit ?? 0 }}</td>
-                                                    <td>{{ $subject->tutorial_credit ?? 0 }}</td>
-                                                    <td>{{ $subject->weekly_hours }}</td>
-                                                    <td class="actions">
-                                                        <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
-                                                        <form method="POST" action="/admin/subjects/{{ $subject->id }}/delete">
-                                                            @csrf
-                                                            <button type="submit" class="btn btn-danger">Delete</button>
-                                                        </form>
-                                                    </td>
-                                                </tr>
-                                            @endforeach
-                                        </tbody>
-                                    </table>
+                                </div>
                             </div>
                         </div>
                     @endforeach
@@ -291,7 +362,7 @@
                             <strong>Semester {{ $semester }}</strong>
                         </div>
                         <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: center;">
-                            <span>Per Class Weekly Hours: {{ $summary['per_class_hours'] }} Hours</span>
+                            <span data-field="per-class-hours">Per Class Weekly Hours: {{ $summary['per_class_hours'] }} Hours</span>
                             <span>Selected Classes: <span data-field="selected-classes">{{ empty($summary['selected_classes']) ? 'None' : implode(', ', $summary['selected_classes']) }}</span></span>
                             <span>Total Classes: <span data-field="total-classes">{{ $summary['total_classes'] }}</span></span>
                             <span><strong>Total Weekly Hours:</strong> <span data-field="total-hours">{{ $summary['total_hours'] }} Hours</span></span>
@@ -334,17 +405,23 @@
             }
 
             const totalClasses = selectedClasses.length;
-            const perClassValue = Number(summaryCard.dataset.perClassHours || 0);
-            const totalHours = perClassValue * totalClasses;
+            const checkedClassOptions = Array.from(document.querySelectorAll('.division-checkbox[data-semester="' + semester + '"]:checked'));
+            const totalHours = checkedClassOptions.reduce(function (sum, checkbox) {
+                return sum + (Number(checkbox.dataset.hours) || 0);
+            }, 0);
+            const perClassValue = totalClasses ? totalHours / totalClasses : 0;
+            const formattedPerClassHours = Number.isInteger(perClassValue) ? String(perClassValue) : perClassValue.toFixed(1);
             const selectedLabel = totalClasses > 0 ? selectedClasses.join(', ') : 'None';
 
             summaryCard.querySelector('[data-field="selected-classes"]').textContent = selectedLabel;
             summaryCard.querySelector('[data-field="total-classes"]').textContent = String(totalClasses);
             summaryCard.querySelector('[data-field="total-hours"]').textContent = String(totalHours) + ' Hours';
+            summaryCard.querySelector('[data-field="per-class-hours"]').innerHTML = '<strong>Per Class Weekly Hours:</strong> ' + formattedPerClassHours + ' Hours';
 
             summaryRow.querySelector('[data-field="selected-classes"]').textContent = selectedLabel;
             summaryRow.querySelector('[data-field="total-classes"]').textContent = String(totalClasses);
             summaryRow.querySelector('[data-field="total-hours"]').textContent = String(totalHours) + ' Hours';
+            summaryRow.querySelector('[data-field="per-class-hours"]').textContent = 'Per Class Weekly Hours: ' + formattedPerClassHours + ' Hours';
 
             updateOverallTotal();
         }
@@ -356,11 +433,13 @@
                 checkbox.addEventListener('change', function () {
                     const divisionName = this.dataset.division;
                     const isActive = this.checked;
-                    
+                    const previousState = !isActive;
+
                     fetch('/admin/divisions/toggle', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
+                            'Accept': 'application/json',
                             'X-CSRF-TOKEN': '{{ csrf_token() }}'
                         },
                         body: JSON.stringify({
@@ -368,13 +447,35 @@
                             division: divisionName,
                             is_active: isActive
                         })
-                    }).catch(console.error);
+                    }).then(function (response) {
+                        if (!response.ok) {
+                            throw new Error('The class selection could not be saved.');
+                        }
+                    }).catch(function (error) {
+                        checkbox.checked = previousState;
+                        const restoredClasses = [];
+                        document.querySelectorAll('.division-checkbox[data-semester="' + semester + '"]').forEach(function (input) {
+                            if (input.checked) {
+                                restoredClasses.push(input.dataset.division);
+                            }
+                        });
+                        document.querySelectorAll('[data-semester-group="' + semester + '"]').forEach(function (group) {
+                            group.hidden = !restoredClasses.includes(group.dataset.selectionClassGroup);
+                        });
+                        updateSemesterSummary(semester, restoredClasses);
+                        window.alert(error.message);
+                    });
 
                     const updatedClasses = [];
                     document.querySelectorAll('.division-checkbox[data-semester="' + semester + '"]').forEach(function (input) {
                         if (input.checked) {
                             updatedClasses.push(input.dataset.division);
                         }
+                    });
+
+                    document.querySelectorAll('[data-semester-group="' + semester + '"]').forEach(function (group) {
+                        const selected = updatedClasses.includes(group.dataset.selectionClassGroup);
+                        group.hidden = !selected;
                     });
 
                     updateSemesterSummary(semester, updatedClasses);

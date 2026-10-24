@@ -4,15 +4,6 @@
 
 @section('content')
 
-@php
-    if (!isset($semesters)) {
-        $semesters = collect(range(1, 6));
-    }
-    if (!isset($departments)) {
-        $departments = \App\Models\Department::orderBy('name')->get();
-    }
-@endphp
-
     <div class="page-header">
         <div>
             <h1>Add Subject</h1>
@@ -26,7 +17,7 @@
             <div class="alert">{{ $errors->first() }}</div>
         @endif
 
-        <form method="POST" action="/admin/subjects">
+        <form method="POST" action="/admin/subjects" data-subject-selection-form>
             @csrf
             <div class="form-row">
                 <label>Subject Name</label>
@@ -38,24 +29,14 @@
             </div>
             <div class="form-row">
                 <label>Semester</label>
-                <select name="semester" required>
-                    <option value="">Select semester</option>
+                <input type="text" name="semester" list="existing-semesters" value="{{ old('semester') }}" required />
+                <datalist id="existing-semesters">
                     @foreach ($semesters as $semester)
-                        <option value="{{ $semester }}" {{ old('semester') == $semester ? 'selected' : '' }}>
-                            Semester {{ $semester }}
-                        </option>
+                        <option value="{{ $semester }}">Semester {{ $semester }}</option>
                     @endforeach
-                </select>
+                </datalist>
             </div>
-            <div class="form-row">
-                <label>Class / Division</label>
-                <select name="division">
-                    <option value="">Select class</option>
-                    <option value="A" {{ old('division') === 'A' ? 'selected' : '' }}>Class A</option>
-                    <option value="B" {{ old('division') === 'B' ? 'selected' : '' }}>Class B</option>
-                    <option value="C" {{ old('division') === 'C' ? 'selected' : '' }}>Class C</option>
-                </select>
-            </div>
+            @include('admin.subjects._group-selections')
             <div class="form-row">
                 <label>Department</label>
                 <select name="department_id" required>
