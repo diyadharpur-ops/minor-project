@@ -16,6 +16,7 @@ use App\Services\ClassroomAllocationService;
 use App\Services\FacultyAllocationService;
 use App\Services\TimetableGenerator;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
@@ -935,10 +936,100 @@ Route::post('/admin/divisions/toggle', function (Request $request) {
         'is_active' => 'required|boolean',
     ]);
 
-    Division::updateOrCreate(
-        ['name' => $data['division'], 'semester' => $data['semester']],
-        ['is_active' => $data['is_active']],
-    );
+    DB::transaction(function () use ($data): void {
+        Division::updateOrCreate(
+            ['name' => $data['division'], 'semester' => $data['semester']],
+            ['is_active' => $data['is_active']],
+        );
+
+        if ($data['is_active']) {
+            return;
+        }
+
+        Subject::query()
+            ->where('semester', $data['semester'])
+            ->get()
+            ->each(function (Subject $subject) use ($data): void {
+                foreach (['division_selections', 'tutorial_selections'] as $selectionColumn) {
+                    $subject->{$selectionColumn} = array_values(array_filter(
+                        $subject->{$selectionColumn} ?? [],
+                        fn (string $selection): bool => $selection[0] !== $data['division'],
+                    ));
+                }
+
+                $subject->save();
+            });
+    });
+
+    return response()->json(['success' => true]);
+});
+
+Route::post('/admin/subjects/selection-toggle', function (Request $request) {
+    if (! session('admin.auth')) {
+        return response()->json(['error' => 'Unauthorized'], 401);
+    }
+
+    $data = $request->validate([
+        'semester' => 'required|string|exists:subjects,semester',
+        'assignment_type' => 'required|in:division,tutorial',
+        'selection' => 'required|string',
+        'is_selected' => 'required|boolean',
+    ]);
+
+    $validSelections = $data['assignment_type'] === 'division'
+        ? ['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', 'B4', 'C1', 'C2', 'C3', 'C4']
+        : ['AT1', 'AT2', 'AT3', 'AT4', 'BT1', 'BT2', 'BT3', 'BT4', 'CT1', 'CT2', 'CT3', 'CT4'];
+
+    if (! in_array($data['selection'], $validSelections, true)) {
+        throw ValidationException::withMessages([
+            'selection' => 'Choose a valid '.$data['assignment_type'].' selection.',
+        ]);
+    }
+
+    $class = $data['selection'][0];
+    $classIsActive = Division::query()
+        ->where('semester', $data['semester'])
+        ->where('name', $class)
+        ->where('is_active', true)
+        ->exists();
+
+    if (! $classIsActive) {
+        throw ValidationException::withMessages([
+            'selection' => 'Select the matching class before assigning this group.',
+        ]);
+    }
+
+    $column = $data['assignment_type'].'_selections';
+
+    DB::transaction(function () use ($data, $column): void {
+        Subject::query()
+            ->with('division')
+            ->where('semester', $data['semester'])
+            ->get()
+            ->each(function (Subject $subject) use ($data, $column): void {
+                $classes = $subject->class_selections;
+
+                if ($classes === null) {
+                    $classes = $subject->division?->name
+                        ? [$subject->division->name]
+                        : ['A', 'B', 'C'];
+                }
+
+                $selectionClass = $data['selection'][0];
+                if (! in_array($selectionClass, $classes, true)) {
+                    return;
+                }
+
+                $selections = array_values(array_diff($subject->{$column} ?? [], [$data['selection']]));
+
+                if ($data['is_selected'] && ! in_array($data['selection'], $selections, true)) {
+                    $selections[] = $data['selection'];
+                }
+
+                $subject->{$column} = $selections;
+                $subject->save();
+            });
+    });
 
     return response()->json(['success' => true]);
 });

@@ -258,7 +258,14 @@
                                                     @foreach (range(1, 4) as $number)
                                                         @php $divisionSelection = $class.$number; @endphp
                                                         <label class="selection-chip">
-                                                            <input type="checkbox" disabled {{ in_array($divisionSelection, $semesterSummary['division_selections'], true) ? 'checked' : '' }}>
+                                                            <input
+                                                                type="checkbox"
+                                                                class="assignment-checkbox"
+                                                                data-semester="{{ $semester }}"
+                                                                data-assignment-type="division"
+                                                                data-selection="{{ $divisionSelection }}"
+                                                                {{ in_array($divisionSelection, $semesterSummary['division_selections'], true) ? 'checked' : '' }}
+                                                            >
                                                             <span>{{ $divisionSelection }}</span>
                                                         </label>
                                                     @endforeach
@@ -275,7 +282,14 @@
                                                     @foreach (range(1, 4) as $number)
                                                         @php $tutorialSelection = $class.'T'.$number; @endphp
                                                         <label class="selection-chip">
-                                                            <input type="checkbox" disabled {{ in_array($tutorialSelection, $semesterSummary['tutorial_selections'], true) ? 'checked' : '' }}>
+                                                            <input
+                                                                type="checkbox"
+                                                                class="assignment-checkbox"
+                                                                data-semester="{{ $semester }}"
+                                                                data-assignment-type="tutorial"
+                                                                data-selection="{{ $tutorialSelection }}"
+                                                                {{ in_array($tutorialSelection, $semesterSummary['tutorial_selections'], true) ? 'checked' : '' }}
+                                                            >
                                                             <span>{{ $tutorialSelection }}</span>
                                                         </label>
                                                     @endforeach
@@ -434,6 +448,13 @@
                     const divisionName = this.dataset.division;
                     const isActive = this.checked;
                     const previousState = !isActive;
+                    const relatedOptions = document.querySelectorAll(
+                        '[data-semester-group="' + semester + '"][data-selection-class-group="' + divisionName + '"] .assignment-checkbox'
+                    );
+
+                    relatedOptions.forEach(function (option) {
+                        option.disabled = true;
+                    });
 
                     fetch('/admin/divisions/toggle', {
                         method: 'POST',
@@ -451,8 +472,17 @@
                         if (!response.ok) {
                             throw new Error('The class selection could not be saved.');
                         }
+                        relatedOptions.forEach(function (option) {
+                            option.disabled = !isActive;
+                            if (!isActive) {
+                                option.checked = false;
+                            }
+                        });
                     }).catch(function (error) {
                         checkbox.checked = previousState;
+                        relatedOptions.forEach(function (option) {
+                            option.disabled = previousState;
+                        });
                         const restoredClasses = [];
                         document.querySelectorAll('.division-checkbox[data-semester="' + semester + '"]').forEach(function (input) {
                             if (input.checked) {
@@ -479,6 +509,34 @@
                     });
 
                     updateSemesterSummary(semester, updatedClasses);
+                });
+            });
+        });
+
+        document.querySelectorAll('.assignment-checkbox').forEach(function (checkbox) {
+            checkbox.addEventListener('change', function () {
+                const previousState = !this.checked;
+
+                fetch('/admin/subjects/selection-toggle', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({
+                        semester: this.dataset.semester,
+                        assignment_type: this.dataset.assignmentType,
+                        selection: this.dataset.selection,
+                        is_selected: this.checked
+                    })
+                }).then(function (response) {
+                    if (!response.ok) {
+                        throw new Error('The selection could not be saved. Please try again.');
+                    }
+                }).catch(function (error) {
+                    checkbox.checked = previousState;
+                    window.alert(error.message);
                 });
             });
         });

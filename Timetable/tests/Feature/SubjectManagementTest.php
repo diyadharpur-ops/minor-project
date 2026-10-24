@@ -260,6 +260,76 @@ test('subject class, division, and tutorial selections persist independently thr
     expect(Storage::disk('local')->exists($recordPath))->toBeFalse();
 });
 
+test('division and tutorial selections on the manage subjects page save independently', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+        'description' => 'Computer Science Department',
+    ]);
+    Division::create(['name' => 'A', 'semester' => '3', 'is_active' => true]);
+    $subject = Subject::create([
+        'name' => 'Database Systems',
+        'subject_code' => 'CS303',
+        'semester' => '3',
+        'department_id' => $department->id,
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+    ]);
+    $session = ['admin.auth' => ['name' => 'Admin User', 'email' => 'admin@example.com']];
+
+    $this->withSession($session)
+        ->get('/admin/subjects')
+        ->assertOk()
+        ->assertSee('data-assignment-type="division"', false)
+        ->assertSee('data-selection="A1"', false)
+        ->assertSee('data-assignment-type="tutorial"', false)
+        ->assertSee('data-selection="AT1"', false)
+        ->assertDontSee('type="checkbox" disabled', false);
+
+    $this->withSession($session)->postJson('/admin/subjects/selection-toggle', [
+        'semester' => '3',
+        'assignment_type' => 'division',
+        'selection' => 'A1',
+        'is_selected' => true,
+    ])->assertOk()->assertJson(['success' => true]);
+
+    $this->withSession($session)->postJson('/admin/subjects/selection-toggle', [
+        'semester' => '3',
+        'assignment_type' => 'tutorial',
+        'selection' => 'AT1',
+        'is_selected' => true,
+    ])->assertOk()->assertJson(['success' => true]);
+
+    $subject->refresh();
+    expect($subject->division_selections)->toBe(['A1'])
+        ->and($subject->tutorial_selections)->toBe(['AT1']);
+
+    $this->withSession($session)->postJson('/admin/subjects/selection-toggle', [
+        'semester' => '3',
+        'assignment_type' => 'division',
+        'selection' => 'A1',
+        'is_selected' => false,
+    ])->assertOk();
+
+    expect($subject->fresh()->division_selections)->toBe([])
+        ->and($subject->fresh()->tutorial_selections)->toBe(['AT1']);
+
+    $this->withSession($session)->get('/admin/subjects')
+        ->assertOk()
+        ->assertSee('data-assignment-type="tutorial"', false)
+        ->assertSee('data-selection="AT1"', false)
+        ->assertSee('checked', false);
+
+    $this->withSession($session)->postJson('/admin/divisions/toggle', [
+        'semester' => '3',
+        'division' => 'A',
+        'is_active' => false,
+    ])->assertOk();
+
+    expect($subject->fresh()->division_selections)->toBe([])
+        ->and($subject->fresh()->tutorial_selections)->toBe([]);
+});
+
 test('subject selections reject children from classes that were not selected', function () {
     $department = Department::create([
         'name' => 'Computer Science',
