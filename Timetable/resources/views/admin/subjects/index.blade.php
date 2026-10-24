@@ -391,6 +391,14 @@
     </div>
 
     <script>
+        let selectionSaveQueue = Promise.resolve();
+
+        function enqueueSelectionSave(saveSelection, onError) {
+            selectionSaveQueue = selectionSaveQueue
+                .then(saveSelection)
+                .catch(onError);
+        }
+
         function toggleSemester(header) {
             const content = header.nextElementSibling;
             header.classList.toggle('collapsed');
@@ -456,29 +464,31 @@
                         option.disabled = true;
                     });
 
-                    fetch('/admin/divisions/toggle', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json',
-                            'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                        },
-                        body: JSON.stringify({
-                            semester: semester,
-                            division: divisionName,
-                            is_active: isActive
-                        })
-                    }).then(function (response) {
-                        if (!response.ok) {
-                            throw new Error('The class selection could not be saved.');
-                        }
-                        relatedOptions.forEach(function (option) {
-                            option.disabled = !isActive;
-                            if (!isActive) {
-                                option.checked = false;
+                    enqueueSelectionSave(function () {
+                        return fetch('/admin/divisions/toggle', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json',
+                                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                            },
+                            body: JSON.stringify({
+                                semester: semester,
+                                division: divisionName,
+                                is_active: isActive
+                            })
+                        }).then(function (response) {
+                            if (!response.ok) {
+                                throw new Error('The class selection could not be saved.');
                             }
+                            relatedOptions.forEach(function (option) {
+                                option.disabled = !isActive;
+                                if (!isActive) {
+                                    option.checked = false;
+                                }
+                            });
                         });
-                    }).catch(function (error) {
+                    }, function (error) {
                         checkbox.checked = previousState;
                         relatedOptions.forEach(function (option) {
                             option.disabled = previousState;
@@ -515,27 +525,33 @@
 
         document.querySelectorAll('.assignment-checkbox').forEach(function (checkbox) {
             checkbox.addEventListener('change', function () {
-                const previousState = !this.checked;
+                const isSelected = this.checked;
+                const assignmentCheckbox = this;
+                assignmentCheckbox.disabled = true;
 
-                fetch('/admin/subjects/selection-toggle', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                    },
-                    body: JSON.stringify({
-                        semester: this.dataset.semester,
-                        assignment_type: this.dataset.assignmentType,
-                        selection: this.dataset.selection,
-                        is_selected: this.checked
-                    })
-                }).then(function (response) {
-                    if (!response.ok) {
-                        throw new Error('The selection could not be saved. Please try again.');
-                    }
-                }).catch(function (error) {
-                    checkbox.checked = previousState;
+                enqueueSelectionSave(function () {
+                    return fetch('/admin/subjects/selection-toggle', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                        },
+                        body: JSON.stringify({
+                            semester: assignmentCheckbox.dataset.semester,
+                            assignment_type: assignmentCheckbox.dataset.assignmentType,
+                            selection: assignmentCheckbox.dataset.selection,
+                            is_selected: isSelected
+                        })
+                    }).then(function (response) {
+                        if (!response.ok) {
+                            throw new Error('The selection could not be saved. Please try again.');
+                        }
+                        assignmentCheckbox.disabled = false;
+                    });
+                }, function (error) {
+                    assignmentCheckbox.checked = !isSelected;
+                    assignmentCheckbox.disabled = false;
                     window.alert(error.message);
                 });
             });
