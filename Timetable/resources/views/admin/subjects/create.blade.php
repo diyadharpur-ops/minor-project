@@ -57,16 +57,23 @@
                 </select>
             </div>
             <div class="form-row">
-                <label>Lecture Weekly Hours</label>
+                <label>Lecture Credit per Selected Class</label>
                 <input type="number" name="lecture_credit" min="0" max="10" value="{{ old('lecture_credit') }}" required />
             </div>
             <div class="form-row">
-                <label>Lab Weekly Hours</label>
+                <label>Lab Credit per Selected Division</label>
                 <input type="number" name="lab_credit" min="0" max="10" value="{{ old('lab_credit') }}" required />
             </div>
             <div class="form-row">
-                <label>Tutorial Weekly Hours</label>
+                <label>Tutorial Credit per Selected Group (optional)</label>
                 <input type="number" name="tutorial_credit" min="0" max="10" value="{{ old('tutorial_credit') }}" />
+            </div>
+            <div class="subject-calculation-preview" aria-live="polite">
+                <strong>Calculated Weekly Load</strong>
+                <span>Lecture: <span data-calculated-field="lecture-credits">0</span> credits / <span data-calculated-field="lecture-hours">0</span> hours</span>
+                <span>Lab: <span data-calculated-field="lab-credits">0</span> credits / <span data-calculated-field="lab-hours">0</span> hours</span>
+                <span>Tutorial: <span data-calculated-field="tutorial-credits">0</span> credits / <span data-calculated-field="tutorial-hours">0</span> hours</span>
+                <strong>Total Weekly Hours: <span data-calculated-field="total-hours">0</span></strong>
             </div>
             <div class="page-actions">
                 <button type="submit" class="btn">Create</button>

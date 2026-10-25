@@ -36,20 +36,112 @@ class Subject extends Model
 
     public function getWeeklyHoursAttribute(): int
     {
-        return ((int) ($this->lecture_credit ?? 0))
-            + ((int) ($this->lab_credit ?? 0) * 2)
-            + ((int) ($this->tutorial_credit ?? 0));
+        return $this->lecture_weekly_hours
+            + $this->lab_weekly_hours
+            + $this->tutorial_weekly_hours;
+    }
+
+    public function getEffectiveClassSelectionsAttribute(): array
+    {
+        if ($this->class_selections !== null) {
+            return $this->class_selections;
+        }
+
+        $classes = collect([
+            ...($this->division_selections ?? []),
+            ...($this->tutorial_selections ?? []),
+        ])
+            ->map(fn (string $selection): string => $selection[0])
+            ->filter(fn (string $class): bool => in_array($class, ['A', 'B', 'C'], true))
+            ->unique()
+            ->values();
+
+        if ($classes->isNotEmpty()) {
+            return $classes->all();
+        }
+
+        $legacyClass = $this->division?->name;
+
+        return in_array($legacyClass, ['A', 'B', 'C'], true) ? [$legacyClass] : [];
+    }
+
+    public function getTotalLectureCreditsAttribute(): int
+    {
+        return (int) ($this->lecture_credit ?? 0) * count($this->effective_class_selections);
+    }
+
+    public function getTotalLabCreditsAttribute(): int
+    {
+        return (int) ($this->lab_credit ?? 0) * count($this->division_selections ?? []);
+    }
+
+    public function getTotalTutorialCreditsAttribute(): int
+    {
+        return (int) ($this->tutorial_credit ?? 0) * count($this->tutorial_selections ?? []);
+    }
+
+    public function getLectureWeeklyHoursAttribute(): int
+    {
+        return $this->total_lecture_credits;
+    }
+
+    public function getLabWeeklyHoursAttribute(): int
+    {
+        return $this->total_lab_credits * 2;
+    }
+
+    public function getTutorialWeeklyHoursAttribute(): int
+    {
+        return $this->total_tutorial_credits;
+    }
+
+    public function lectureCreditsForClass(string $class): int
+    {
+        return in_array($class, $this->effective_class_selections, true)
+            ? (int) ($this->lecture_credit ?? 0)
+            : 0;
+    }
+
+    public function labCreditsForClass(string $class): int
+    {
+        if (! in_array($class, $this->effective_class_selections, true)) {
+            return 0;
+        }
+
+        $divisionCount = collect($this->division_selections ?? [])
+            ->filter(fn (string $selection): bool => $selection[0] === $class)
+            ->count();
+
+        return (int) ($this->lab_credit ?? 0) * $divisionCount;
+    }
+
+    public function tutorialCreditsForClass(string $class): int
+    {
+        if (! in_array($class, $this->effective_class_selections, true)) {
+            return 0;
+        }
+
+        $tutorialCount = collect($this->tutorial_selections ?? [])
+            ->filter(fn (string $selection): bool => $selection[0] === $class)
+            ->count();
+
+        return (int) ($this->tutorial_credit ?? 0) * $tutorialCount;
+    }
+
+    public function weeklyHoursForClass(string $class): int
+    {
+        return $this->lectureCreditsForClass($class)
+            + ($this->labCreditsForClass($class) * 2)
+            + $this->tutorialCreditsForClass($class);
     }
 
     public function getClassSelectionLabelAttribute(): string
     {
-        if ($this->class_selections !== null) {
-            return $this->class_selections === []
-                ? 'No classes'
-                : implode(', ', $this->class_selections);
+        if ($this->effective_class_selections !== []) {
+            return implode(', ', $this->effective_class_selections);
         }
 
-        return $this->division?->name ?? 'All classes';
+        return $this->class_selections !== null ? 'No classes' : 'Not specified';
     }
 
     public function department(): BelongsTo

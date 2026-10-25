@@ -1,6 +1,10 @@
 <?php
 
 use App\Models\Department;
+use App\Models\Faculty;
+use App\Models\FacultyWorkload;
+use App\Models\RoomAllocation;
+use App\Models\Subject;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -64,7 +68,7 @@ test('admin can create and manage faculty workload records with automatic calcul
         ->assertSee('FAC001')
         ->assertSee('Overloaded');
 
-    $workload = \App\Models\FacultyWorkload::first();
+    $workload = FacultyWorkload::first();
 
     $this->withSession([
         'admin.auth' => [
@@ -85,14 +89,14 @@ test('admin can auto generate faculty workload from department allocation data',
         'hod_name' => 'Prof. Mehta',
     ]);
 
-    $faculty = \App\Models\Faculty::create([
+    $faculty = Faculty::create([
         'name' => 'Dr. Neha Joshi',
         'email' => 'neha@example.com',
         'designation' => 'Professor',
         'department_id' => $department->id,
     ]);
 
-    $subject = \App\Models\Subject::create([
+    $subject = Subject::create([
         'name' => 'Database Management',
         'subject_code' => 'DBMS101',
         'semester' => '3',
@@ -101,14 +105,18 @@ test('admin can auto generate faculty workload from department allocation data',
         'lecture_credit' => 3,
         'lab_credit' => 2,
         'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1'],
+        'tutorial_selections' => ['AT1'],
     ]);
 
-    \App\Models\RoomAllocation::create([
+    RoomAllocation::create([
         'department_id' => $department->id,
         'semester' => '3',
         'subject_id' => $subject->id,
         'faculty_id' => $faculty->id,
         'class_name' => 'CE-3A',
+        'division' => 'A',
         'status' => 'Allocated',
     ]);
 
@@ -129,6 +137,11 @@ test('admin can auto generate faculty workload from department allocation data',
         'semester' => '3',
         'subject_name' => 'Database Management',
         'subject_code' => 'DBMS101',
+        'lecture_hours' => 3,
+        'tutorial_hours' => 1,
+        'lab_hours' => 4,
+        'theory_hours' => 4,
+        'practical_hours' => 4,
         'weekly_hours' => 8,
         'weekly_workload' => 8,
     ]);

@@ -167,9 +167,9 @@
                             <th>Semester</th>
                             <th>Class</th>
                             <th>Department</th>
-                            <th>Lecture</th>
-                            <th>Lab</th>
-                            <th>Tutorial</th>
+                            <th>Lecture Credits</th>
+                            <th>Lab Credits</th>
+                            <th>Tutorial Credits</th>
                             <th>Weekly Hours</th>
                             <th>Actions</th>
                         </tr>
@@ -183,9 +183,9 @@
                                 <td>{{ $subject->semester }}</td>
                                 <td>{{ $subject->class_selection_label }}</td>
                                 <td>{{ $subject->department?->name ?? 'N/A' }}</td>
-                                <td>{{ $subject->lecture_credit ?? 0 }}</td>
-                                <td>{{ $subject->lab_credit ?? 0 }}</td>
-                                <td>{{ $subject->tutorial_credit ?? 0 }}</td>
+                                <td>{{ $subject->total_lecture_credits }}</td>
+                                <td>{{ $subject->total_lab_credits }}</td>
+                                <td>{{ $subject->total_tutorial_credits }}</td>
                                 <td>{{ $subject->weekly_hours }}</td>
                                 <td class="actions">
                                     <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
@@ -215,11 +215,12 @@
                             </div>
                             @php
                                 $semesterSummary = $semesterWeeklyHours->get($semester, [
-                                    'per_class_hours' => 0,
                                     'selected_classes' => [],
                                     'total_classes' => 0,
+                                    'total_lecture_credits' => 0,
+                                    'total_lab_credits' => 0,
+                                    'total_tutorial_credits' => 0,
                                     'total_hours' => 0,
-                                    'class_hours' => [],
                                     'divisions' => collect(),
                                     'division_selections' => [],
                                     'tutorial_selections' => [],
@@ -228,9 +229,6 @@
                             @endphp
                             <div class="semester-content" data-semester-summary="{{ $semester }}">
                                 <div style="padding: 16px; border-bottom: 1px solid #e5e7eb; background: #fafafa;">
-                                    <div data-field="per-class-hours">
-                                        <strong>Per Class Weekly Hours:</strong> {{ $semesterSummary['per_class_hours'] }} Hours
-                                    </div>
                                     <div class="selection-group">
                                         <strong>Class Selection:</strong>
                                         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
@@ -241,7 +239,6 @@
                                                         class="division-checkbox"
                                                         data-semester="{{ $semester }}"
                                                         data-division="{{ $division->name }}"
-                                                        data-hours="{{ $semesterSummary['class_hours'][$division->name] ?? 0 }}"
                                                         {{ ($division->is_active ?? false) ? 'checked' : '' }}
                                                     >
                                                     <span>{{ $division->name }}</span>
@@ -306,9 +303,9 @@
                                             <th>Semester</th>
                                             <th>Class</th>
                                             <th>Department</th>
-                                            <th>Lecture</th>
-                                            <th>Lab</th>
-                                            <th>Tutorial</th>
+                                            <th>Lecture Credits</th>
+                                            <th>Lab Credits</th>
+                                            <th>Tutorial Credits</th>
                                             <th>Weekly Hours</th>
                                             <th>Actions</th>
                                         </tr>
@@ -321,9 +318,9 @@
                                                 <td>{{ $subject->semester }}</td>
                                                 <td>{{ $subject->class_selection_label }}</td>
                                                 <td>{{ $subject->department?->name ?? 'N/A' }}</td>
-                                                <td>{{ $subject->lecture_credit ?? 0 }}</td>
-                                                <td>{{ $subject->lab_credit ?? 0 }}</td>
-                                                <td>{{ $subject->tutorial_credit ?? 0 }}</td>
+                                                <td>{{ $subject->total_lecture_credits }}</td>
+                                                <td>{{ $subject->total_lab_credits }}</td>
+                                                <td>{{ $subject->total_tutorial_credits }}</td>
                                                 <td>{{ $subject->weekly_hours }}</td>
                                                 <td class="actions">
                                                     <a href="/admin/subjects/{{ $subject->id }}/edit" class="btn btn-muted">Edit</a>
@@ -343,6 +340,15 @@
                                         </div>
                                         <div>
                                             <strong>Total Classes:</strong> <span data-field="total-classes">{{ $semesterSummary['total_classes'] }}</span>
+                                        </div>
+                                        <div>
+                                            <strong>Total Lecture Credits:</strong> <span data-field="total-lecture-credits">{{ $semesterSummary['total_lecture_credits'] }}</span>
+                                        </div>
+                                        <div>
+                                            <strong>Total Lab Credits:</strong> <span data-field="total-lab-credits">{{ $semesterSummary['total_lab_credits'] }}</span>
+                                        </div>
+                                        <div>
+                                            <strong>Total Tutorial Credits:</strong> <span data-field="total-tutorial-credits">{{ $semesterSummary['total_tutorial_credits'] }}</span>
                                         </div>
                                         <div style="font-size: 1.05rem; color: #111827;">
                                             <strong>Total Weekly Hours:</strong> <span data-field="total-hours">{{ $semesterSummary['total_hours'] }} Hours</span>
@@ -369,16 +375,17 @@
                 @foreach ($semesterWeeklyHours as $semester => $summary)
                     <div
                         data-semester-summary-row="{{ $semester }}"
-                        data-per-class-hours="{{ $summary['per_class_hours'] }}"
                         style="display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #f9fafb; border-radius: 6px; gap: 12px; flex-wrap: wrap;"
                     >
                         <div>
                             <strong>Semester {{ $semester }}</strong>
                         </div>
                         <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: center;">
-                            <span data-field="per-class-hours">Per Class Weekly Hours: {{ $summary['per_class_hours'] }} Hours</span>
                             <span>Selected Classes: <span data-field="selected-classes">{{ empty($summary['selected_classes']) ? 'None' : implode(', ', $summary['selected_classes']) }}</span></span>
                             <span>Total Classes: <span data-field="total-classes">{{ $summary['total_classes'] }}</span></span>
+                            <span>Total Lecture Credits: <span data-field="total-lecture-credits">{{ $summary['total_lecture_credits'] }}</span></span>
+                            <span>Total Lab Credits: <span data-field="total-lab-credits">{{ $summary['total_lab_credits'] }}</span></span>
+                            <span>Total Tutorial Credits: <span data-field="total-tutorial-credits">{{ $summary['total_tutorial_credits'] }}</span></span>
                             <span><strong>Total Weekly Hours:</strong> <span data-field="total-hours">{{ $summary['total_hours'] }} Hours</span></span>
                         </div>
                     </div>
@@ -419,7 +426,7 @@
             }
         }
 
-        function updateSemesterSummary(semester, selectedClasses) {
+        function updateSemesterSummary(semester, selectedClasses, totals) {
             const summaryCard = document.querySelector('[data-semester-summary="' + semester + '"]');
             const summaryRow = document.querySelector('[data-semester-summary-row="' + semester + '"]');
             if (!summaryCard || !summaryRow) {
@@ -427,25 +434,33 @@
             }
 
             const totalClasses = selectedClasses.length;
-            const checkedClassOptions = Array.from(document.querySelectorAll('.division-checkbox[data-semester="' + semester + '"]:checked'));
-            const totalHours = checkedClassOptions.reduce(function (sum, checkbox) {
-                return sum + (Number(checkbox.dataset.hours) || 0);
-            }, 0);
-            const perClassValue = totalClasses ? totalHours / totalClasses : 0;
-            const formattedPerClassHours = Number.isInteger(perClassValue) ? String(perClassValue) : perClassValue.toFixed(1);
             const selectedLabel = totalClasses > 0 ? selectedClasses.join(', ') : 'None';
 
             summaryCard.querySelector('[data-field="selected-classes"]').textContent = selectedLabel;
             summaryCard.querySelector('[data-field="total-classes"]').textContent = String(totalClasses);
-            summaryCard.querySelector('[data-field="total-hours"]').textContent = String(totalHours) + ' Hours';
-            summaryCard.querySelector('[data-field="per-class-hours"]').innerHTML = '<strong>Per Class Weekly Hours:</strong> ' + formattedPerClassHours + ' Hours';
-
             summaryRow.querySelector('[data-field="selected-classes"]').textContent = selectedLabel;
             summaryRow.querySelector('[data-field="total-classes"]').textContent = String(totalClasses);
-            summaryRow.querySelector('[data-field="total-hours"]').textContent = String(totalHours) + ' Hours';
-            summaryRow.querySelector('[data-field="per-class-hours"]').textContent = 'Per Class Weekly Hours: ' + formattedPerClassHours + ' Hours';
 
+            if (totals) {
+                [
+                    ['total-lecture-credits', totals.total_lecture_credits],
+                    ['total-lab-credits', totals.total_lab_credits],
+                    ['total-tutorial-credits', totals.total_tutorial_credits]
+                ].forEach(function ([field, value]) {
+                    summaryCard.querySelector('[data-field="' + field + '"]').textContent = String(value);
+                    summaryRow.querySelector('[data-field="' + field + '"]').textContent = String(value);
+                });
+                summaryCard.querySelector('[data-field="total-hours"]').textContent = String(totals.total_hours) + ' Hours';
+                summaryRow.querySelector('[data-field="total-hours"]').textContent = String(totals.total_hours) + ' Hours';
+            }
             updateOverallTotal();
+        }
+
+        function currentSelectedClasses(semester) {
+            return Array.from(document.querySelectorAll('.division-checkbox[data-semester="' + semester + '"]:checked'))
+                .map(function (checkbox) {
+                    return checkbox.dataset.division;
+                });
         }
 
         document.addEventListener('DOMContentLoaded', function () {
@@ -487,6 +502,9 @@
                                     option.checked = false;
                                 }
                             });
+                            return response.json();
+                        }).then(function (payload) {
+                            updateSemesterSummary(semester, updatedClasses, payload.summary);
                         });
                     }, function (error) {
                         checkbox.checked = previousState;
@@ -506,12 +524,7 @@
                         window.alert(error.message);
                     });
 
-                    const updatedClasses = [];
-                    document.querySelectorAll('.division-checkbox[data-semester="' + semester + '"]').forEach(function (input) {
-                        if (input.checked) {
-                            updatedClasses.push(input.dataset.division);
-                        }
-                    });
+                    const updatedClasses = currentSelectedClasses(semester);
 
                     document.querySelectorAll('[data-semester-group="' + semester + '"]').forEach(function (group) {
                         const selected = updatedClasses.includes(group.dataset.selectionClassGroup);
@@ -548,6 +561,13 @@
                             throw new Error('The selection could not be saved. Please try again.');
                         }
                         assignmentCheckbox.disabled = false;
+                        return response.json();
+                    }).then(function (payload) {
+                        updateSemesterSummary(
+                            assignmentCheckbox.dataset.semester,
+                            currentSelectedClasses(assignmentCheckbox.dataset.semester),
+                            payload.summary
+                        );
                     });
                 }, function (error) {
                     assignmentCheckbox.checked = !isSelected;

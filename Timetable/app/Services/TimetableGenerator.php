@@ -7,11 +7,11 @@ use App\Models\Department;
 use App\Models\Division;
 use App\Models\Faculty;
 use App\Models\Notification;
+use App\Models\RoomAllocation;
 use App\Models\Subject;
 use App\Models\TimetableEntry;
-use Illuminate\Support\Facades\DB;
-use App\Models\RoomAllocation;
 use Exception;
+use Illuminate\Support\Facades\DB;
 
 class TimetableGenerator
 {
@@ -40,16 +40,26 @@ class TimetableGenerator
         if ($divModel) {
             $subjects = Subject::where('department_id', $deptId)
                 ->where('semester', $semester)
-                ->where('division_id', $divModel->id)
+                ->where(function ($query) use ($divModel): void {
+                    $query->where('division_id', $divModel->id)
+                        ->orWhereNull('division_id');
+                })
                 ->get();
-        }
-
-        if ($subjects->isEmpty()) {
+        } else {
             $subjects = Subject::where('department_id', $deptId)
                 ->where('semester', $semester)
                 ->whereNull('division_id')
                 ->get();
         }
+
+        if ($subjects->isEmpty()) {
+            return false;
+        }
+
+        $subjects = $subjects
+            ->loadMissing('division')
+            ->filter(fn (Subject $subject): bool => in_array($division, $subject->effective_class_selections, true))
+            ->values();
 
         if ($subjects->isEmpty()) {
             return false;
@@ -102,14 +112,19 @@ class TimetableGenerator
             if ($alloc && $alloc->faculty_id) {
                 return $allFaculty->firstWhere('id', $alloc->faculty_id);
             }
-            if ($allFaculty->isEmpty()) return null;
+            if ($allFaculty->isEmpty()) {
+                return null;
+            }
             if ($subject->faculty_name) {
                 $f = $allFaculty->first(fn ($fac) => stripos($fac->name, $subject->faculty_name) !== false);
-                if ($f) return $f;
+                if ($f) {
+                    return $f;
+                }
             }
             $f = $allFaculty->first(function ($fac) use ($subject) {
                 return $fac->subjects && stripos($fac->subjects, $subject->name) !== false;
             });
+
             return $f ?: $allFaculty->random();
         };
 
@@ -119,10 +134,10 @@ class TimetableGenerator
 
         foreach ($subjects as $subject) {
             $faculty = $getFaculty($subject);
-            
-            $lectureCount = (int) ($subject->lecture_credit ?? 0);
-            $labCount = (int) ($subject->lab_credit ?? 0);
-            $tutorialCount = (int) ($subject->tutorial_credit ?? 0);
+
+            $lectureCount = $subject->lectureCreditsForClass($division);
+            $labCount = $subject->labCreditsForClass($division);
+            $tutorialCount = $subject->tutorialCreditsForClass($division);
 
             // Fallback for older data without detailed credits
             if ($lectureCount == 0 && $labCount == 0 && $tutorialCount == 0 && ($subject->credit ?? 0) > 0) {
@@ -153,7 +168,7 @@ class TimetableGenerator
                 ]);
                 $totalHours += 2;
             }
-            
+
             for ($i = 0; $i < $tutorialCount; $i++) {
                 $blocks->push((object) [
                     'type' => 'Tutorial',
@@ -239,7 +254,7 @@ class TimetableGenerator
                     // Find Available Room
                     $availableRoomId = null;
                     $secondRoomNotes = null;
-                    
+
                     // Check if there is a pre-allocated room
                     $alloc = $roomAllocations->firstWhere('subject_id', $block->subject->id);
                     if ($alloc && $alloc->classroom_id) {
@@ -257,7 +272,7 @@ class TimetableGenerator
                         if (! $roomConflict) {
                             $availableRoomId = $alloc->classroom_id;
                             if ($alloc->secondClassroom) {
-                                $secondRoomNotes = 'Room2:' . $alloc->secondClassroom->room_number;
+                                $secondRoomNotes = 'Room2:'.$alloc->secondClassroom->room_number;
                             }
                         }
                     }
@@ -370,7 +385,7 @@ class TimetableGenerator
             }
         }
 
-        DB::transaction(function () use ($deptId, $semester, $division, $academicYear, $term, $bestSchedule, $blocks, $bestPlacedCount) {
+        DB::transaction(function () use ($deptId, $semester, $division, $academicYear, $term, $bestSchedule) {
             // Delete existing entries for this class before saving new ones
             TimetableEntry::where([
                 'department_id' => $deptId,

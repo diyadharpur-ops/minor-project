@@ -155,17 +155,38 @@
                                 @php
                                     $subject = $allocation->subject;
                                     $facultyName = $allocation->faculty?->name ?? ($subject?->faculty?->name ?? '—');
+                                    $className = $allocation->division;
                                     $allocationRows = collect([
-                                        ['type' => 'Lecture', 'hours' => (int) ($subject?->lecture_credit ?? 0)],
-                                        ['type' => 'Lab', 'hours' => (int) ($subject?->lab_credit ?? 0) * 2],
-                                        ['type' => 'Tutorial', 'hours' => (int) ($subject?->tutorial_credit ?? 0)],
+                                        [
+                                            'type' => 'Lecture',
+                                            'hours' => $className
+                                                ? ($subject?->lectureCreditsForClass($className) ?? 0)
+                                                : ($subject?->total_lecture_credits ?? 0),
+                                        ],
+                                        [
+                                            'type' => 'Lab',
+                                            'hours' => $className
+                                                ? (($subject?->labCreditsForClass($className) ?? 0) * 2)
+                                                : ($subject?->lab_weekly_hours ?? 0),
+                                        ],
+                                        [
+                                            'type' => 'Tutorial',
+                                            'hours' => $className
+                                                ? ($subject?->tutorialCreditsForClass($className) ?? 0)
+                                                : ($subject?->total_tutorial_credits ?? 0),
+                                        ],
                                     ])->filter(fn (array $row): bool => $row['hours'] > 0);
 
                                     if ($allocationRows->isEmpty() && $subject) {
                                         $subTypeRaw = strtolower((string) $subject->subject_type);
                                         $detectedType = str_contains($subTypeRaw, 'lab') || str_contains($subTypeRaw, 'practical') ? 'Lab' : (str_contains($subTypeRaw, 'tutorial') ? 'Tutorial' : 'Lecture');
                                         $allocationRows = collect([
-                                            ['type' => $detectedType, 'hours' => (int) ($subject->weekly_hours ?: 1)],
+                                            [
+                                                'type' => $detectedType,
+                                                'hours' => (int) ($className
+                                                    ? $subject->weeklyHoursForClass($className)
+                                                    : $subject->weekly_hours),
+                                            ],
                                         ]);
                                     }
                                 @endphp
@@ -232,4 +253,3 @@
     });
 </script>
 @endsection
-

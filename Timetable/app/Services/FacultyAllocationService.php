@@ -134,7 +134,7 @@ class FacultyAllocationService
         DB::transaction(function () use (&$created, $warnings, $batches): void {
             foreach ($batches as $batch) {
                 $subjects = Subject::query()
-                    ->with('faculty')
+                    ->with('faculty', 'division')
                     ->where('department_id', $batch['department_id'])
                     ->where('semester', $batch['semester'])
                     ->where(function ($query) use ($batch): void {
@@ -145,7 +145,9 @@ class FacultyAllocationService
                         }
                     })
                     ->orderBy('name')
-                    ->get();
+                    ->get()
+                    ->filter(fn (Subject $subject): bool => in_array($batch['name'], $subject->effective_class_selections, true))
+                    ->values();
 
                 if ($subjects->isEmpty()) {
                     $warnings->push("No subjects available for {$batch['class_name']}.");
@@ -167,6 +169,7 @@ class FacultyAllocationService
                             'semester' => $batch['semester'],
                             'subject_id' => $subject->id,
                             'class_name' => $batch['class_name'],
+                            'division' => $batch['name'],
                         ]));
                     }
 
@@ -185,6 +188,7 @@ class FacultyAllocationService
 
                     foreach ($allocations as $allocation) {
                         $allocation->faculty_id = $faculty?->id;
+                        $allocation->division = $batch['name'];
                         $allocation->save();
                     }
                     $created++;
@@ -305,14 +309,23 @@ class FacultyAllocationService
         RoomAllocation::query()
             ->where('department_id', $batch['department_id'])
             ->where('semester', $batch['semester'])
-            ->with('subject')
+            ->with('subject.division')
             ->get()
-            ->each(function (RoomAllocation $allocation) use (&$hoursByFaculty): void {
+            ->groupBy(fn (RoomAllocation $allocation): string => $allocation->subject_id.'|'.$allocation->class_name)
+            ->each(function ($allocations) use (&$hoursByFaculty): void {
+                $allocation = $allocations->first(fn (RoomAllocation $candidate): bool => ! empty($candidate->faculty_id));
+
+                if (! $allocation) {
+                    return;
+                }
+
                 if (empty($allocation->faculty_id)) {
                     return;
                 }
 
-                $subjectHours = (int) ($allocation->subject?->weekly_hours ?? 0);
+                $subjectHours = $allocation->division
+                    ? (int) ($allocation->subject?->weeklyHoursForClass($allocation->division) ?? 0)
+                    : (int) ($allocation->subject?->weekly_hours ?? 0);
                 $hoursByFaculty[$allocation->faculty_id] = ($hoursByFaculty[$allocation->faculty_id] ?? 0) + $subjectHours;
             });
 

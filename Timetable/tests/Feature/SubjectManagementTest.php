@@ -25,6 +25,10 @@ test('admin can create and list subjects with lecture and lab credits while leav
         'lecture_credit' => 3,
         'lab_credit' => 1,
         'tutorial_credit' => '',
+        'selection_groups_present' => 1,
+        'class_selections' => ['A', 'B'],
+        'division_selections' => ['A1', 'A2'],
+        'tutorial_selections' => [],
     ]);
 
     $response->assertRedirect('/admin/subjects');
@@ -50,6 +54,10 @@ test('admin can create and list subjects with lecture and lab credits while leav
         'lecture_credit' => 2,
         'lab_credit' => 0,
         'tutorial_credit' => 1,
+        'selection_groups_present' => 1,
+        'class_selections' => ['A', 'B'],
+        'division_selections' => [],
+        'tutorial_selections' => ['AT1', 'AT2'],
     ])->assertRedirect('/admin/subjects');
 
     Division::create(['name' => 'A', 'semester' => '3']);
@@ -58,22 +66,117 @@ test('admin can create and list subjects with lecture and lab credits while leav
     $this->get('/admin/subjects')
         ->assertOk()
         ->assertSee('Semester-wise Weekly Hours Summary')
-        ->assertSee('Per Class Weekly Hours: 8 Hours')
         ->assertSee('Selected Classes:')
         ->assertSee('A, B')
         ->assertSee('Total Classes:')
         ->assertSee('2')
-        ->assertSee('Total Weekly Hours: 16 Hours')
+        ->assertSee('Total Lecture Credits:')
+        ->assertSee('data-field="total-lecture-credits">10</span>', false)
+        ->assertSee('Total Lab Credits:')
+        ->assertSee('data-field="total-lab-credits">2</span>', false)
+        ->assertSee('Total Tutorial Credits:')
+        ->assertSee('data-field="total-tutorial-credits">2</span>', false)
+        ->assertSee('data-field="total-hours">16 Hours</span>', false)
         ->assertSee('Overall Total Weekly Hours: 16 Hours')
-        ->assertSee('>5</td>', false)
-        ->assertSee('>3</td>', false);
+        ->assertSee('>6</td>', false)
+        ->assertSee('>4</td>', false);
 
     $subject = Subject::latest()->first();
     expect($subject->folder_path)->not->toBeNull();
     expect(Storage::disk('local')->exists($subject->folder_path))->toBeTrue();
 });
 
-test('subject management shows per-class weekly hours and division totals per semester', function () {
+test('calculates all weekly credits and hours from the selected groups', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+
+    $this->withSession(['admin.auth' => [
+        'name' => 'Admin User',
+        'email' => 'admin@example.com',
+    ]])->post('/admin/subjects', [
+        'name' => 'Selected Group Calculations',
+        'subject_code' => 'CS103',
+        'semester' => '3',
+        'department_id' => $department->id,
+        'lecture_credit' => 1,
+        'lab_credit' => 1,
+        'tutorial_credit' => 1,
+        'selection_groups_present' => 1,
+        'class_selections' => ['A', 'B'],
+        'division_selections' => ['A1', 'A2'],
+        'tutorial_selections' => ['AT1', 'BT1'],
+    ])->assertRedirect('/admin/subjects');
+
+    $subject = Subject::where('subject_code', 'CS103')->firstOrFail();
+
+    expect($subject->total_lecture_credits)->toBe(2)
+        ->and($subject->total_lab_credits)->toBe(2)
+        ->and($subject->total_tutorial_credits)->toBe(2)
+        ->and($subject->lecture_weekly_hours)->toBe(2)
+        ->and($subject->lab_weekly_hours)->toBe(4)
+        ->and($subject->tutorial_weekly_hours)->toBe(2)
+        ->and($subject->weekly_hours)->toBe(8)
+        ->and($subject->weeklyHoursForClass('A'))->toBe(6)
+        ->and($subject->weeklyHoursForClass('B'))->toBe(2);
+
+    $this->withSession(['admin.auth' => [
+        'name' => 'Admin User',
+        'email' => 'admin@example.com',
+    ]])->get('/admin/subjects')
+        ->assertOk()
+        ->assertSee('data-field="total-lecture-credits">2</span>', false)
+        ->assertSee('data-field="total-lab-credits">2</span>', false)
+        ->assertSee('data-field="total-tutorial-credits">2</span>', false)
+        ->assertSee('data-field="total-hours">8 Hours</span>', false);
+});
+
+test('infers classes only from saved group selections when the class list is missing', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Existing Group Configuration',
+        'subject_code' => 'CS104',
+        'semester' => '3',
+        'department_id' => $department->id,
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+        'tutorial_credit' => 1,
+        'division_selections' => ['A1', 'A2', 'B1', 'B2'],
+        'tutorial_selections' => ['AT1', 'BT1'],
+    ]);
+
+    expect($subject->effective_class_selections)->toBe(['A', 'B'])
+        ->and($subject->total_lecture_credits)->toBe(6)
+        ->and($subject->total_lab_credits)->toBe(4)
+        ->and($subject->total_tutorial_credits)->toBe(2)
+        ->and($subject->weekly_hours)->toBe(16);
+});
+
+test('does not assume classes for existing subjects without saved selections', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Unconfigured Existing Subject',
+        'subject_code' => 'CS105',
+        'semester' => '3',
+        'department_id' => $department->id,
+        'lecture_credit' => 3,
+        'lab_credit' => 1,
+        'tutorial_credit' => 1,
+    ]);
+
+    expect($subject->effective_class_selections)->toBe([])
+        ->and($subject->class_selection_label)->toBe('Not specified')
+        ->and($subject->weekly_hours)->toBe(0);
+});
+
+test('subject management totals calculated credits and hours once per semester', function () {
     $department = Department::create([
         'name' => 'Computer Science',
         'code' => 'CS',
@@ -88,6 +191,8 @@ test('subject management shows per-class weekly hours and division totals per se
         'lecture_credit' => 3,
         'lab_credit' => 1,
         'tutorial_credit' => 0,
+        'class_selections' => ['A', 'B'],
+        'division_selections' => ['A1', 'B1'],
     ]);
 
     Subject::create([
@@ -98,6 +203,9 @@ test('subject management shows per-class weekly hours and division totals per se
         'lecture_credit' => 2,
         'lab_credit' => 0,
         'tutorial_credit' => 1,
+        'class_selections' => ['A', 'B'],
+        'division_selections' => [],
+        'tutorial_selections' => ['AT1', 'BT1'],
     ]);
 
     Division::create(['name' => 'A', 'semester' => '3']);
@@ -109,12 +217,14 @@ test('subject management shows per-class weekly hours and division totals per se
     ]])
         ->get('/admin/subjects')
         ->assertOk()
-        ->assertSee('Per Class Weekly Hours: 8 Hours')
         ->assertSee('Selected Classes:')
         ->assertSee('A, B')
         ->assertSee('Total Classes:')
         ->assertSee('2')
-        ->assertSee('Total Weekly Hours: 16 Hours')
+        ->assertSee('data-field="total-lecture-credits">10</span>', false)
+        ->assertSee('data-field="total-lab-credits">2</span>', false)
+        ->assertSee('data-field="total-tutorial-credits">2</span>', false)
+        ->assertSee('data-field="total-hours">16 Hours</span>', false)
         ->assertSee('Overall Total Weekly Hours: 16 Hours');
 });
 
@@ -166,9 +276,9 @@ test('admin can select class A, B, or C directly from the subject form', functio
     $this->withSession($session)
         ->get('/admin/subjects/create')
         ->assertOk()
-        ->assertSee('Lecture Weekly Hours')
-        ->assertSee('Lab Weekly Hours')
-        ->assertSee('Tutorial Weekly Hours')
+        ->assertSee('Lecture Credit per Selected Class')
+        ->assertSee('Lab Credit per Selected Division')
+        ->assertSee('Tutorial Credit per Selected Group')
         ->assertSee('value="A"', false)
         ->assertSee('value="B"', false)
         ->assertSee('value="C"', false);
@@ -187,7 +297,7 @@ test('admin can select class A, B, or C directly from the subject form', functio
     $subject = Subject::where('subject_code', 'CS401')->firstOrFail();
 
     expect($subject->division?->name)->toBe('C')
-        ->and($subject->weekly_hours)->toBe(6);
+        ->and($subject->weekly_hours)->toBe(3);
 });
 
 test('subject class, division, and tutorial selections persist independently through editing and deletion', function () {
@@ -248,7 +358,6 @@ test('subject class, division, and tutorial selections persist independently thr
         ->assertSee('B4')
         ->assertSee('BT3')
         ->assertSee('Distributed Systems')
-        ->assertSee('Per Class Weekly Hours: 5 Hours')
         ->assertSee('Total Weekly Hours: 5 Hours');
 
     $recordPath = $subject->folder_path;
@@ -274,6 +383,7 @@ test('division and tutorial selections on the manage subjects page save independ
         'department_id' => $department->id,
         'lecture_credit' => 3,
         'lab_credit' => 1,
+        'class_selections' => ['A'],
     ]);
     $session = ['admin.auth' => ['name' => 'Admin User', 'email' => 'admin@example.com']];
 

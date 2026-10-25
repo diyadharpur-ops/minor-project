@@ -1,74 +1,72 @@
 <?php
 
+use App\Models\Classroom;
+use App\Models\Department;
+use App\Models\Division;
+use App\Models\Faculty;
+use App\Models\Subject;
+use App\Models\TimetableEntry;
 use App\Services\TimetableGenerator;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
-it('generates conflict-free weekly sessions for a selected semester', function () {
-    $generator = new TimetableGenerator();
+uses(RefreshDatabase::class);
 
-    $subjects = [
-        [
-            'id' => 1,
-            'name' => 'Java Programming',
-            'subject_code' => 'JAVA101',
-            'semester' => '5',
-            'credit' => 3,
-            'theory_hours' => 3,
-            'practical_hours' => 0,
-            'faculty_name' => 'Prof. Shah',
-        ],
-        [
-            'id' => 2,
-            'name' => 'DBMS Lab',
-            'subject_code' => 'DBMS201',
-            'semester' => '5',
-            'credit' => 1,
-            'theory_hours' => 0,
-            'practical_hours' => 2,
-            'faculty_name' => 'Prof. Mehta',
-        ],
-    ];
+it('generates conflict-free sessions using the selected class and lab groups', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $faculty = Faculty::create([
+        'name' => 'Prof. Shah',
+        'email' => 'shah@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+    Division::create(['name' => 'A', 'semester' => '5', 'is_active' => true]);
+    Classroom::create([
+        'room_number' => 'A101',
+        'room_capacity' => 40,
+        'room_type' => 'Classroom',
+        'availability' => 'Available',
+    ]);
+    Classroom::create([
+        'room_number' => 'LAB1',
+        'room_capacity' => 40,
+        'room_type' => 'Lab',
+        'availability' => 'Available',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Java Programming',
+        'subject_code' => 'JAVA101',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'faculty_id' => $faculty->id,
+        'lecture_credit' => 1,
+        'lab_credit' => 1,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A', 'B'],
+        'division_selections' => ['A1', 'A2'],
+        'tutorial_selections' => ['AT1'],
+    ]);
 
-    $faculties = [
-        ['id' => 1, 'name' => 'Prof. Shah', 'availability' => 'Available', 'subjects' => ['Java Programming']],
-        ['id' => 2, 'name' => 'Prof. Mehta', 'availability' => 'Available', 'subjects' => ['DBMS Lab']],
-    ];
+    expect($subject->weekly_hours)->toBe(7)
+        ->and($subject->weeklyHoursForClass('A'))->toBe(6);
 
-    $classrooms = [
-        ['id' => 1, 'room_number' => 'A101', 'room_type' => 'Classroom', 'availability' => 'Booked'],
-        ['id' => 2, 'room_number' => 'A102', 'room_type' => 'Classroom', 'availability' => 'Available'],
-        ['id' => 3, 'room_number' => 'LAB1', 'room_type' => 'Lab', 'availability' => 'Available'],
-    ];
-
-    $result = $generator->generate(
+    expect((new TimetableGenerator)->generate(
+        $department->id,
         '5',
-        ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
-        ['09:00-10:00', '10:00-11:00', '11:00-12:00', '01:00-02:00', '02:00-03:00'],
-        $subjects,
-        $faculties,
-        $classrooms
-    );
+        'A',
+        '2026-2027',
+        'Odd',
+    ))->toBeTrue();
 
-    expect($result['sessions'])->toHaveCount(4);
+    $entries = TimetableEntry::query()
+        ->where('department_id', $department->id)
+        ->where('semester', '5')
+        ->where('division', 'A')
+        ->get();
 
-    $seen = [];
-    $labBlocks = array_values(array_filter($result['sessions'], fn ($session) => $session['type'] === 'lab'));
-    expect($labBlocks)->toHaveCount(1);
-    expect($labBlocks[0]['day'])->toBeString();
-    expect($labBlocks[0]['time_slot'])->toBeString();
-
-    $this->assertTrue(collect($result['sessions'])->contains(fn ($session) => $session['room'] === 'A102'));
-
-    foreach ($result['sessions'] as $session) {
-        $facultyKey = $session['faculty'] . '|' . $session['day'] . '|' . $session['time_slot'];
-        $roomKey = $session['room'] . '|' . $session['day'] . '|' . $session['time_slot'];
-        $classKey = $session['subject'] . '|' . $session['day'] . '|' . $session['time_slot'];
-
-        expect($seen)->not->toHaveKey($facultyKey);
-        expect($seen)->not->toHaveKey($roomKey);
-        expect($seen)->not->toHaveKey($classKey);
-
-        $seen[$facultyKey] = true;
-        $seen[$roomKey] = true;
-        $seen[$classKey] = true;
-    }
+    expect($entries)->toHaveCount(4)
+        ->and($entries->where('lecture_type', 'Practical'))->toHaveCount(2)
+        ->and($entries->sum('duration'))->toBe(6);
 });

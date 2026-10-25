@@ -761,7 +761,7 @@ Route::post('/admin/faculty-workload/generate', function (Request $request) {
     }
 
     $allocations = RoomAllocation::query()
-        ->with(['faculty', 'subject'])
+        ->with(['faculty', 'subject.division'])
         ->where('department_id', $department->id)
         ->orderBy('semester')
         ->orderBy('subject_id')
@@ -771,18 +771,37 @@ Route::post('/admin/faculty-workload/generate', function (Request $request) {
         return back()->with('error', 'No faculty allocation found for the selected department.');
     }
 
-    foreach ($allocations as $allocation) {
+    $workloadGroups = $allocations
+        ->filter(fn (RoomAllocation $allocation): bool => $allocation->faculty !== null && $allocation->subject !== null)
+        ->groupBy(fn (RoomAllocation $allocation): string => $allocation->faculty_id.'|'.$allocation->subject_id);
+
+    foreach ($workloadGroups as $subjectAllocations) {
+        $allocation = $subjectAllocations->first();
         $faculty = $allocation->faculty;
         $subject = $allocation->subject;
+        $classAllocations = $subjectAllocations
+            ->unique(fn (RoomAllocation $classAllocation): string => $classAllocation->division ?: $classAllocation->class_name);
 
-        if (! $faculty || ! $subject) {
-            continue;
+        $lectureHours = 0;
+        $tutorialHours = 0;
+        $labHours = 0;
+
+        foreach ($classAllocations as $classAllocation) {
+            $class = $classAllocation->division;
+            if (in_array($class, ['A', 'B', 'C'], true)) {
+                $lectureHours += $subject->lectureCreditsForClass($class);
+                $tutorialHours += $subject->tutorialCreditsForClass($class);
+                $labHours += $subject->labCreditsForClass($class) * 2;
+
+                continue;
+            }
+
+            $lectureHours += $subject->total_lecture_credits;
+            $tutorialHours += $subject->total_tutorial_credits;
+            $labHours += $subject->total_lab_credits * 2;
         }
 
-        $lectureHours = (int) ($subject->lecture_credit ?? 0);
-        $tutorialHours = (int) ($subject->tutorial_credit ?? 0);
-        $labHours = (int) ($subject->lab_credit ?? 0);
-        $weeklyHours = $lectureHours + $tutorialHours + ($labHours * 2);
+        $weeklyHours = $lectureHours + $tutorialHours + $labHours;
 
         FacultyWorkload::query()->updateOrCreate([
             'faculty_id' => (string) $faculty->id,
@@ -925,7 +944,21 @@ Route::post('/admin/faculty-workload/{id}/delete', function ($id) {
     return redirect('/admin/faculty-workload')->with('status', 'Faculty workload deleted successfully.');
 });
 
-Route::post('/admin/divisions/toggle', function (Request $request) {
+$subjectTotalsForSemester = function (string $semester): array {
+    $subjects = Subject::query()
+        ->with('division')
+        ->where('semester', $semester)
+        ->get();
+
+    return [
+        'total_lecture_credits' => (int) $subjects->sum(fn (Subject $subject): int => $subject->total_lecture_credits),
+        'total_lab_credits' => (int) $subjects->sum(fn (Subject $subject): int => $subject->total_lab_credits),
+        'total_tutorial_credits' => (int) $subjects->sum(fn (Subject $subject): int => $subject->total_tutorial_credits),
+        'total_hours' => (int) $subjects->sum(fn (Subject $subject): int => $subject->weekly_hours),
+    ];
+};
+
+Route::post('/admin/divisions/toggle', function (Request $request) use ($subjectTotalsForSemester) {
     if (! session('admin.auth')) {
         return response()->json(['error' => 'Unauthorized'], 401);
     }
@@ -961,10 +994,13 @@ Route::post('/admin/divisions/toggle', function (Request $request) {
             });
     });
 
-    return response()->json(['success' => true]);
+    return response()->json([
+        'success' => true,
+        'summary' => $subjectTotalsForSemester($data['semester']),
+    ]);
 });
 
-Route::post('/admin/subjects/selection-toggle', function (Request $request) {
+Route::post('/admin/subjects/selection-toggle', function (Request $request) use ($subjectTotalsForSemester) {
     if (! session('admin.auth')) {
         return response()->json(['error' => 'Unauthorized'], 401);
     }
@@ -1007,16 +1043,8 @@ Route::post('/admin/subjects/selection-toggle', function (Request $request) {
             ->where('semester', $data['semester'])
             ->get()
             ->each(function (Subject $subject) use ($data, $column): void {
-                $classes = $subject->class_selections;
-
-                if ($classes === null) {
-                    $classes = $subject->division?->name
-                        ? [$subject->division->name]
-                        : ['A', 'B', 'C'];
-                }
-
                 $selectionClass = $data['selection'][0];
-                if (! in_array($selectionClass, $classes, true)) {
+                if (! in_array($selectionClass, $subject->effective_class_selections, true)) {
                     return;
                 }
 
@@ -1031,7 +1059,10 @@ Route::post('/admin/subjects/selection-toggle', function (Request $request) {
             });
     });
 
-    return response()->json(['success' => true]);
+    return response()->json([
+        'success' => true,
+        'summary' => $subjectTotalsForSemester($data['semester']),
+    ]);
 });
 
 Route::get('/admin/subjects', function (Request $request) {
@@ -1062,23 +1093,7 @@ Route::get('/admin/subjects', function (Request $request) {
                 ->filter(fn ($division) => (bool) $division->is_active)
                 ->pluck('name')
                 ->all();
-            $classHours = collect($classOptions)->mapWithKeys(function (string $class) use ($semesterSubjects): array {
-                $hours = $semesterSubjects->sum(function (Subject $subject) use ($class): int {
-                    $subjectClasses = $subject->class_selections;
-
-                    if ($subjectClasses === null) {
-                        $subjectClasses = $subject->division?->name
-                            ? [$subject->division->name]
-                            : ['A', 'B', 'C'];
-                    }
-
-                    return in_array($class, $subjectClasses, true) ? $subject->weekly_hours : 0;
-                });
-
-                return [$class => (int) $hours];
-            });
             $totalClasses = count($selectedClasses);
-            $totalHours = (int) $classHours->only($selectedClasses)->sum();
 
             $divisionSelections = $semesterSubjects
                 ->flatMap(fn (Subject $subject) => $subject->division_selections ?? [])
@@ -1092,12 +1107,13 @@ Route::get('/admin/subjects', function (Request $request) {
                 ->all();
 
             return [
-                'per_class_hours' => $totalClasses > 0 ? $totalHours / $totalClasses : 0,
-                'class_hours' => $classHours->all(),
                 'divisions' => $divisions,
                 'selected_classes' => $selectedClasses,
                 'total_classes' => $totalClasses,
-                'total_hours' => $totalHours,
+                'total_lecture_credits' => (int) $semesterSubjects->sum(fn (Subject $subject): int => $subject->total_lecture_credits),
+                'total_lab_credits' => (int) $semesterSubjects->sum(fn (Subject $subject): int => $subject->total_lab_credits),
+                'total_tutorial_credits' => (int) $semesterSubjects->sum(fn (Subject $subject): int => $subject->total_tutorial_credits),
+                'total_hours' => (int) $semesterSubjects->sum(fn (Subject $subject): int => $subject->weekly_hours),
                 'division_selections' => $divisionSelections,
                 'tutorial_selections' => $tutorialSelections,
             ];
@@ -1536,7 +1552,7 @@ Route::get('/admin/faculty-allocation', function (Request $request, FacultyAlloc
         'selectedDepartmentId' => $departmentId,
         'selectedSemester' => $semester,
         'selectedDivision' => $division,
-        'subjects' => Subject::query()->when(filled($departmentId), fn ($query) => $query->where('department_id', $departmentId))->when(filled($semester), fn ($query) => $query->where('semester', $semester))->orderBy('name')->get(['id', 'name', 'subject_type', 'lecture_credit', 'lab_credit', 'tutorial_credit', 'semester', 'department_id', 'faculty_id']),
+        'subjects' => Subject::query()->with('division')->when(filled($departmentId), fn ($query) => $query->where('department_id', $departmentId))->when(filled($semester), fn ($query) => $query->where('semester', $semester))->orderBy('name')->get(['id', 'name', 'subject_type', 'credit', 'lecture_credit', 'lab_credit', 'tutorial_credit', 'class_selections', 'division_selections', 'tutorial_selections', 'division_id', 'semester', 'department_id', 'faculty_id']),
         'faculties' => Faculty::orderBy('name')->get(['id', 'name', 'department_id']),
         'subjectTypes' => Subject::query()->whereNotNull('subject_type')->distinct()->orderBy('subject_type')->pluck('subject_type'),
     ]);

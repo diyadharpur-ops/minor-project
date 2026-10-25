@@ -34,6 +34,8 @@ test('faculty allocation service uses real project data and subject metadata', f
         'lecture_credit' => 3,
         'lab_credit' => 0,
         'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'tutorial_selections' => ['AT1'],
     ]);
 
     User::create([
@@ -110,6 +112,7 @@ test('faculty allocation service balances workload across faculty for the same s
             'lecture_credit' => $hours,
             'lab_credit' => 0,
             'tutorial_credit' => 0,
+            'class_selections' => ['A'],
         ]);
     }
 
@@ -156,6 +159,9 @@ test('admin faculty allocation page derives semester and division options from a
         'lecture_credit' => 3,
         'lab_credit' => 1,
         'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1'],
+        'tutorial_selections' => ['AT1'],
     ]);
 
     User::create([
