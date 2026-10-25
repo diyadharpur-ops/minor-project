@@ -1888,7 +1888,21 @@ Route::post('/faculty/login', function (Request $request) {
         return back()->withErrors(['email' => 'Faculty account not found.'])->withInput();
     }
 
-    if (! Hash::check($data['password'], $faculty->password)) {
+    $passwordMatches = false;
+    $storedPassword = (string) $faculty->password;
+
+    try {
+        $passwordMatches = Hash::check($data['password'], $storedPassword);
+    } catch (\RuntimeException $e) {
+        $passwordMatches = hash_equals($storedPassword, $data['password']);
+
+        if ($passwordMatches) {
+            $faculty->password = $data['password'];
+            $faculty->save();
+        }
+    }
+
+    if (! $passwordMatches) {
         return back()->withErrors(['email' => 'Invalid email or password.'])->withInput();
     }
 
@@ -1917,7 +1931,21 @@ Route::post('/student/login', function (Request $request) {
         return back()->withErrors(['enrollment_number' => 'Student account not found.'])->withInput();
     }
 
-    if (! Hash::check($data['password'], $user->password)) {
+    $passwordMatches = false;
+    $storedPassword = (string) $user->password;
+
+    try {
+        $passwordMatches = Hash::check($data['password'], $storedPassword);
+    } catch (\RuntimeException $e) {
+        $passwordMatches = hash_equals($storedPassword, $data['password']);
+
+        if ($passwordMatches) {
+            $user->password = $data['password'];
+            $user->save();
+        }
+    }
+
+    if (! $passwordMatches) {
         return back()->withErrors(['enrollment_number' => 'Invalid enrollment number or password.'])->withInput();
     }
 

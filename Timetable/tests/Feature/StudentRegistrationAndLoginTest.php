@@ -2,8 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\Department;
+use App\Models\Faculty;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
@@ -84,6 +87,36 @@ class StudentRegistrationAndLoginTest extends TestCase
             'enrollment_number' => '2026CE001',
             'password' => 'WrongPassword',
         ])->assertSessionHasErrors(['enrollment_number' => 'Invalid enrollment number or password.']);
+    }
+
+    public function test_faculty_login_accepts_legacy_plaintext_passwords_and_rehashes_them(): void
+    {
+        $department = Department::create([
+            'name' => 'Computer Engineering',
+            'code' => 'CE',
+        ]);
+
+        DB::table('faculties')->insert([
+            'name' => 'Dr. Mehta',
+            'email' => 'mehta@example.com',
+            'designation' => 'Professor',
+            'password' => 'Faculty@123',
+            'department_id' => $department->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->from('/')->post('/faculty/login', [
+            'email' => 'mehta@example.com',
+            'password' => 'Faculty@123',
+        ]);
+
+        $response->assertRedirect('/faculty/dashboard');
+        $this->assertSame('mehta@example.com', session('faculty.auth.email'));
+
+        $faculty = Faculty::where('email', 'mehta@example.com')->first();
+        $this->assertTrue(Hash::check('Faculty@123', $faculty->password));
+        $this->assertNotSame('Faculty@123', $faculty->password);
     }
 
     public function test_admin_can_view_registered_students_in_manage_students_list(): void

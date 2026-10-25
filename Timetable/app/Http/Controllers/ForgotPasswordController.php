@@ -89,18 +89,26 @@ class ForgotPasswordController extends Controller
         }
 
         // Check current password matches new password
-        if (Hash::check($request->password, $user->password)) {
+        $passwordMatches = false;
+        $storedPassword = (string) $user->password;
+
+        try {
+            $passwordMatches = Hash::check($request->password, $storedPassword);
+        } catch (\RuntimeException $e) {
+            $passwordMatches = hash_equals($storedPassword, $request->password);
+
+            if ($passwordMatches) {
+                $user->password = $request->password;
+                $user->save();
+            }
+        }
+
+        if ($passwordMatches) {
             return response()->json(['error' => 'Please choose a different password.'], 400);
         }
 
-        // Update password - User model auto-hashes via cast, Admin/Faculty do not
-        if ($role === 'student') {
-            // User model has 'hashed' cast, assign plain password
-            $user->password = $request->password;
-        } else {
-            // Admin and Faculty models do NOT auto-hash, use Hash::make
-            $user->password = Hash::make($request->password);
-        }
+        // Update password - model mutators hash the value automatically for all roles.
+        $user->password = $request->password;
 
         $user->password_changed_at = Carbon::now();
 
