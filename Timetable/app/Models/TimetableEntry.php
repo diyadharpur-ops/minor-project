@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'faculty_id',
     'classroom_id',
     'lecture_type',
+    'activity_batch',
     'duration',
     'notes'
 ])]

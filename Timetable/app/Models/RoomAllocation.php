@@ -22,6 +22,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'end_time',
     'student_count',
     'allocation_type',
+    'activity_type',
+    'activity_batch',
     'status',
     'notes',
 ])]

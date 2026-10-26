@@ -9,6 +9,7 @@ use App\Models\Faculty;
 use App\Models\FacultyWorkload;
 use App\Models\RoomAllocation;
 use App\Models\Subject;
+use App\Models\TimetableEntry;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -92,7 +93,9 @@ class FacultyAllocationService
         $query = RoomAllocation::query()
             ->with(['department', 'subject.faculty', 'faculty', 'classroom'])
             ->orderBy('class_name')
-            ->orderBy('subject_id');
+            ->orderBy('subject_id')
+            ->orderBy('activity_type')
+            ->orderBy('activity_batch');
 
         if ($selectedBatch) {
             $query->where('department_id', $selectedBatch['department_id'])
@@ -110,7 +113,17 @@ class FacultyAllocationService
             $query->whereHas('subject', fn ($subjectQuery) => $subjectQuery->where('subject_type', $filters['subject_type']));
         }
 
-        return $query->get()->unique(fn ($a) => ($a->class_name ?? '').'|'.$a->subject_id)->values();
+        $allocations = $query->get();
+        $explicitActivityKeys = $allocations
+            ->filter(fn (RoomAllocation $allocation): bool => filled($allocation->activity_type))
+            ->map(fn (RoomAllocation $allocation): string => $allocation->class_name.'|'.$allocation->subject_id)
+            ->unique()
+            ->flip();
+
+        return $allocations
+            ->filter(fn (RoomAllocation $allocation): bool => filled($allocation->activity_type)
+                || ! $explicitActivityKeys->has($allocation->class_name.'|'.$allocation->subject_id))
+            ->values();
     }
 
     public function generate(): array
@@ -131,7 +144,32 @@ class FacultyAllocationService
             ];
         }
 
-        DB::transaction(function () use (&$created, $warnings, $batches): void {
+        $targetClassKeys = $batches
+            ->map(fn (array $batch): string => $batch['department_id'].'|'.$batch['semester'].'|'.$batch['class_name'])
+            ->all();
+        $targetTimetableKeys = $batches
+            ->map(fn (array $batch): string => $batch['department_id'].'|'.$batch['semester'].'|'.$batch['name'])
+            ->all();
+        $facultyOccupancy = $this->facultyOccupancy($targetClassKeys, $targetTimetableKeys);
+        $workloadData = $this->workloadData();
+        $hoursByFaculty = $this->assignedHoursByFaculty($targetClassKeys, $workloadData['hours']);
+        $overloadedFacultyIds = $workloadData['overloaded'];
+        $normalThreshold = (int) config('faculty_workload.normal_threshold', 18);
+        $eligibleFaculty = Faculty::query()
+            ->whereIn('department_id', $batches->pluck('department_id')->unique())
+            ->orderBy('name')
+            ->get();
+
+        DB::transaction(function () use (
+            &$created,
+            $warnings,
+            $batches,
+            $eligibleFaculty,
+            &$hoursByFaculty,
+            $overloadedFacultyIds,
+            $normalThreshold,
+            $facultyOccupancy
+        ): void {
             foreach ($batches as $batch) {
                 $subjects = Subject::query()
                     ->with('faculty', 'division')
@@ -156,42 +194,175 @@ class FacultyAllocationService
                 }
 
                 foreach ($subjects as $subject) {
-                    $allocations = RoomAllocation::query()->where([
+                    $existingAllocations = RoomAllocation::query()->where([
                         'department_id' => $batch['department_id'],
                         'semester' => $batch['semester'],
                         'subject_id' => $subject->id,
                         'class_name' => $batch['class_name'],
                     ])->get();
 
-                    if ($allocations->isEmpty()) {
-                        $allocations->push(new RoomAllocation([
+                    $activityRows = [];
+                    $lectureHours = $subject->lectureCreditsForClass($batch['name']);
+
+                    if ($lectureHours > 0) {
+                        $activityRows[] = [
+                            'type' => 'Lecture',
+                            'batch' => null,
+                            'hours' => $lectureHours,
+                            'mandatory' => false,
+                        ];
+                    }
+
+                    $practicalBatches = collect($subject->division_selections ?? [])
+                        ->filter(fn (string $group): bool => str_starts_with($group, $batch['name'])
+                            && (int) ($subject->lab_credit ?? 0) > 0)
+                        ->values();
+                    foreach ($practicalBatches as $practicalBatch) {
+                        $activityRows[] = [
+                            'type' => 'Practical',
+                            'batch' => $practicalBatch,
+                            'hours' => (int) ($subject->lab_credit ?? 0) * 2,
+                            'mandatory' => str_ends_with($practicalBatch, '1'),
+                        ];
+                    }
+
+                    $tutorialBatches = collect($subject->tutorial_selections ?? [])
+                        ->filter(fn (string $group): bool => str_starts_with($group, $batch['name'])
+                            && (int) ($subject->tutorial_credit ?? 0) > 0)
+                        ->values();
+                    foreach ($tutorialBatches as $tutorialBatch) {
+                        $activityRows[] = [
+                            'type' => 'Tutorial',
+                            'batch' => $tutorialBatch,
+                            'hours' => (int) ($subject->tutorial_credit ?? 0),
+                            'mandatory' => str_ends_with($tutorialBatch, 'T1'),
+                        ];
+                    }
+
+                    if ($activityRows === [] && (int) ($subject->credit ?? 0) > 0) {
+                        $subjectType = mb_strtolower((string) $subject->subject_type);
+                        $fallbackType = str_contains($subjectType, 'lab') || str_contains($subjectType, 'practical')
+                            ? 'Practical'
+                            : (str_contains($subjectType, 'tutorial') ? 'Tutorial' : 'Lecture');
+                        $activityRows[] = [
+                            'type' => $fallbackType,
+                            'batch' => null,
+                            'hours' => $fallbackType === 'Practical'
+                                ? (int) $subject->credit * 2
+                                : (int) $subject->credit,
+                            'mandatory' => false,
+                        ];
+                    }
+
+                    $existingTheoryAllocation = $existingAllocations->first(
+                        fn (RoomAllocation $allocation): bool => $allocation->activity_type === 'Lecture'
+                    );
+                    $legacyFacultyId = $existingAllocations
+                        ->first(fn (RoomAllocation $allocation): bool => $allocation->activity_type === null && $allocation->faculty_id)
+                        ?->faculty_id;
+                    $theoryFaculty = $subject->faculty
+                        ?? Faculty::find($existingTheoryAllocation?->faculty_id ?? $legacyFacultyId)
+                        ?? $eligibleFaculty->first(fn (Faculty $faculty): bool => filled($subject->faculty_name)
+                            && mb_stripos($faculty->name, (string) $subject->faculty_name) !== false);
+
+                    if (! $theoryFaculty && collect($activityRows)->contains(fn (array $row): bool => $row['type'] === 'Lecture')) {
+                        $theoryFaculty = $this->selectFaculty(
+                            $eligibleFaculty,
+                            $subject,
+                            [],
+                            (int) collect($activityRows)->firstWhere('type', 'Lecture')['hours'],
+                            $hoursByFaculty,
+                            $overloadedFacultyIds,
+                            $normalThreshold,
+                            1,
+                            $facultyOccupancy
+                        );
+                    }
+
+                    if (! $theoryFaculty) {
+                        $warnings->push("No eligible theory faculty found for {$subject->name} in {$batch['class_name']}.");
+                    }
+
+                    foreach ($activityRows as $activity) {
+                        if ($activity['type'] === 'Lecture' || $activity['mandatory'] || $activity['batch'] === null) {
+                            $faculty = $theoryFaculty;
+                        } else {
+                            $existingActivityAllocation = $existingAllocations->first(
+                                fn (RoomAllocation $allocation): bool => $allocation->activity_type === $activity['type']
+                                    && $allocation->activity_batch === $activity['batch']
+                            );
+                            $faculty = $this->selectFaculty(
+                                $eligibleFaculty,
+                                $subject,
+                                $theoryFaculty ? [$theoryFaculty->id] : [],
+                                $activity['hours'],
+                                $hoursByFaculty,
+                                $overloadedFacultyIds,
+                                $normalThreshold,
+                                $activity['type'] === 'Practical' ? 2 : 1,
+                                $facultyOccupancy,
+                                $existingActivityAllocation?->faculty_id
+                            );
+                        }
+
+                        if (! $faculty && $activity['type'] !== 'Lecture' && ! $activity['mandatory'] && $activity['batch'] !== null) {
+                            $warnings->push(
+                                "No eligible faculty within workload limits for {$subject->name} {$activity['batch']} in {$batch['class_name']}."
+                            );
+                        } elseif (! $faculty && $activity['mandatory']) {
+                            $warnings->push(
+                                "Mandatory {$activity['batch']} for {$subject->name} has no assigned theory faculty in {$batch['class_name']}."
+                            );
+                        }
+
+                        if ($faculty && $activity['mandatory'] && ! $this->hasAvailableSlot(
+                            $faculty->id,
+                            $activity['type'] === 'Practical' ? 2 : 1,
+                            $facultyOccupancy
+                        )) {
+                            $warnings->push(
+                                "Mandatory {$activity['batch']} for {$subject->name} conflicts with the theory faculty's existing timetable; resolve the conflict without replacing that faculty."
+                            );
+                        }
+
+                        if ($faculty) {
+                            $hoursByFaculty[$faculty->id] = ($hoursByFaculty[$faculty->id] ?? 0) + $activity['hours'];
+                            if (($hoursByFaculty[$faculty->id] ?? 0) > $normalThreshold) {
+                                $warnings->push(
+                                    "Mandatory assignments exceed the configured workload limit for {$faculty->name} ({$subject->name}, {$batch['class_name']})."
+                                );
+                            }
+                        }
+
+                        $allocation = RoomAllocation::firstOrNew([
                             'department_id' => $batch['department_id'],
                             'semester' => $batch['semester'],
                             'subject_id' => $subject->id,
                             'class_name' => $batch['class_name'],
+                            'activity_type' => $activity['type'],
+                            'activity_batch' => $activity['batch'],
+                        ]);
+                        $allocation->fill([
+                            'faculty_id' => $faculty?->id,
                             'division' => $batch['name'],
-                        ]));
-                    }
-
-                    $faculty = $subject->faculty ?? $this->findFacultyForSubject($subject, $batch);
-
-                    if (! $faculty) {
-                        $warnings->push("No available faculty found for {$subject->name} in {$batch['class_name']}.");
-                    }
-
-                    if ($faculty && FacultyWorkload::query()
-                        ->where('faculty_id', (string) $faculty->id)
-                        ->get()
-                        ->contains(fn (FacultyWorkload $workload): bool => $workload->workload_status === 'Overloaded')) {
-                        $warnings->push("Faculty workload is overloaded for {$subject->name} in {$batch['class_name']}.");
-                    }
-
-                    foreach ($allocations as $allocation) {
-                        $allocation->faculty_id = $faculty?->id;
-                        $allocation->division = $batch['name'];
+                            'allocation_type' => $activity['type'] === 'Practical' ? 'Lab' : 'Classroom',
+                            'status' => $allocation->exists ? $allocation->status : 'Unallocated',
+                        ]);
                         $allocation->save();
+                        $created++;
                     }
-                    $created++;
+
+                    $expectedActivityKeys = collect($activityRows)
+                        ->map(fn (array $activity): string => $activity['type'].'|'.($activity['batch'] ?? ''))
+                        ->all();
+                    $existingAllocations
+                        ->filter(fn (RoomAllocation $allocation): bool => filled($allocation->activity_type))
+                        ->each(function (RoomAllocation $allocation) use ($expectedActivityKeys): void {
+                            $key = $allocation->activity_type.'|'.($allocation->activity_batch ?? '');
+                            if (! in_array($key, $expectedActivityKeys, true)) {
+                                $allocation->delete();
+                            }
+                        });
                 }
             }
         });
@@ -200,6 +371,341 @@ class FacultyAllocationService
             'count' => $created,
             'warnings' => $warnings->unique()->values(),
         ];
+    }
+
+    private function assignedHoursByFaculty(array $excludedClassKeys, array $recordedHours): array
+    {
+        $allocations = RoomAllocation::query()
+            ->whereNotNull('faculty_id')
+            ->with('subject')
+            ->get()
+            ->reject(fn (RoomAllocation $allocation): bool => in_array(
+                $allocation->department_id.'|'.$allocation->semester.'|'.$allocation->class_name,
+                $excludedClassKeys,
+                true
+            ));
+
+        $hoursByFaculty = [];
+        $allocations
+            ->groupBy(fn (RoomAllocation $allocation): string => $allocation->department_id.'|'.$allocation->semester.'|'.$allocation->class_name.'|'.$allocation->subject_id)
+            ->each(function ($classAllocations) use (&$hoursByFaculty): void {
+                $activityAllocations = $classAllocations->filter(
+                    fn (RoomAllocation $allocation): bool => filled($allocation->activity_type)
+                );
+
+                if ($activityAllocations->isNotEmpty()) {
+                    foreach ($activityAllocations as $allocation) {
+                        $subject = $allocation->subject;
+                        if (! $subject || ! $allocation->faculty_id) {
+                            continue;
+                        }
+
+                        $class = $allocation->division;
+                        $hours = match ($allocation->activity_type) {
+                            'Lecture' => $subject->lectureCreditsForClass((string) $class),
+                            'Practical' => (int) ($subject->lab_credit ?? 0) * 2,
+                            'Tutorial' => (int) ($subject->tutorial_credit ?? 0),
+                            default => 0,
+                        };
+                        $hoursByFaculty[$allocation->faculty_id] = ($hoursByFaculty[$allocation->faculty_id] ?? 0) + $hours;
+                    }
+
+                    return;
+                }
+
+                $allocation = $classAllocations->first();
+                if (! $allocation?->faculty_id || ! $allocation->subject) {
+                    return;
+                }
+
+                $subjectHours = $allocation->division
+                    ? $allocation->subject->weeklyHoursForClass($allocation->division)
+                    : $allocation->subject->weekly_hours;
+                $hoursByFaculty[$allocation->faculty_id] = ($hoursByFaculty[$allocation->faculty_id] ?? 0) + $subjectHours;
+            });
+
+        foreach ($recordedHours as $facultyId => $hours) {
+            $hoursByFaculty[$facultyId] = max($hoursByFaculty[$facultyId] ?? 0, $hours);
+        }
+
+        return $hoursByFaculty;
+    }
+
+    private function facultyOccupancy(array $excludedClassKeys, array $excludedTimetableKeys): array
+    {
+        $timeSlots = ['10:30-11:30', '11:30-12:30', '01:00-02:00', '02:00-03:00', '03:10-04:10', '04:10-05:10'];
+        $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        $occupancy = [];
+        $entries = TimetableEntry::query()->whereNotNull('faculty_id')->get();
+
+        foreach ($entries as $entry) {
+            if (in_array($entry->department_id.'|'.$entry->semester.'|'.$entry->division, $excludedTimetableKeys, true)) {
+                continue;
+            }
+
+            $slotIndex = array_search($entry->time_slot, $timeSlots, true);
+            if ($slotIndex === false) {
+                continue;
+            }
+
+            $slots = [$entry->time_slot];
+            if ($entry->duration === 2 && isset($timeSlots[$slotIndex + 1])) {
+                $slots[] = $timeSlots[$slotIndex + 1];
+            }
+
+            foreach ($slots as $slot) {
+                $occupancy[$entry->faculty_id][$entry->day][$slot] = true;
+            }
+        }
+
+        $allocations = RoomAllocation::query()
+            ->whereNotNull('faculty_id')
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
+            ->get()
+            ->reject(fn (RoomAllocation $allocation): bool => in_array(
+                $allocation->department_id.'|'.$allocation->semester.'|'.$allocation->class_name,
+                $excludedClassKeys,
+                true
+            ));
+
+        foreach ($allocations as $allocation) {
+            $allocationStart = $this->timeInMinutes((string) $allocation->start_time);
+            $allocationEnd = $this->timeInMinutes((string) $allocation->end_time);
+            if ($allocationStart === null || $allocationEnd === null) {
+                continue;
+            }
+
+            foreach ($timeSlots as $timeSlot) {
+                [$start, $end] = explode('-', $timeSlot);
+                $slotStart = $this->timeInMinutes($start);
+                $slotEnd = $this->timeInMinutes($end);
+                if ($slotStart === null || $slotEnd === null
+                    || $allocationStart >= $slotEnd
+                    || $allocationEnd <= $slotStart) {
+                    continue;
+                }
+
+                $occupancy[$allocation->faculty_id][$allocation->day][$timeSlot] = true;
+            }
+        }
+
+        return ['days' => $days, 'time_slots' => $timeSlots, 'occupied' => $occupancy];
+    }
+
+    private function hasAvailableSlot(int $facultyId, int $duration, array $facultyOccupancy): bool
+    {
+        $occupied = $facultyOccupancy['occupied'][$facultyId] ?? [];
+        $slotCount = count($facultyOccupancy['time_slots']);
+        $validStarts = $duration === 2 ? [0, 2, 4] : range(0, $slotCount - 1);
+
+        foreach ($facultyOccupancy['days'] as $day) {
+            foreach ($validStarts as $start) {
+                if ($start + $duration > $slotCount) {
+                    continue;
+                }
+
+                $isAvailable = true;
+                for ($offset = 0; $offset < $duration; $offset++) {
+                    $slot = $facultyOccupancy['time_slots'][$start + $offset];
+                    if (! empty($occupied[$day][$slot])) {
+                        $isAvailable = false;
+                        break;
+                    }
+                }
+
+                if ($isAvailable) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function timeInMinutes(string $time): ?int
+    {
+        if (preg_match('/^(\\d{1,2}):(\\d{2})$/', $time, $matches) !== 1) {
+            return null;
+        }
+
+        $hour = (int) $matches[1];
+        $minute = (int) $matches[2];
+        if ($minute > 59 || $hour > 23) {
+            return null;
+        }
+
+        if ($hour >= 1 && $hour <= 4) {
+            $hour += 12;
+        } elseif ($hour >= 13 && $hour <= 16) {
+            $hour -= 12;
+        }
+
+        return $hour * 60 + $minute;
+    }
+
+    private function workloadData(): array
+    {
+        $facultyById = Faculty::query()->get(['id', 'name'])->keyBy('id');
+        $facultyIdsByName = $facultyById
+            ->mapWithKeys(fn (Faculty $faculty): array => [mb_strtolower($faculty->name) => $faculty->id]);
+        $hoursByFaculty = [];
+        $overloadedFacultyIds = [];
+
+        FacultyWorkload::query()
+            ->whereNotNull('faculty_id')
+            ->get()
+            ->each(function (FacultyWorkload $workload) use (
+                $facultyById,
+                $facultyIdsByName,
+                &$hoursByFaculty,
+                &$overloadedFacultyIds
+            ): void {
+                $storedFacultyId = (string) $workload->faculty_id;
+                $facultyId = ctype_digit($storedFacultyId) && $facultyById->has((int) $storedFacultyId)
+                    ? (int) $storedFacultyId
+                    : $facultyIdsByName->get(mb_strtolower((string) $workload->faculty_name));
+
+                if (! $facultyId) {
+                    return;
+                }
+
+                $hoursByFaculty[$facultyId] = ($hoursByFaculty[$facultyId] ?? 0) + $workload->total_hours;
+                if ($workload->workload_status === 'Overloaded') {
+                    $overloadedFacultyIds[$facultyId] = $facultyId;
+                }
+            });
+
+        return [
+            'hours' => $hoursByFaculty,
+            'overloaded' => array_values($overloadedFacultyIds),
+        ];
+    }
+
+    private function selectFaculty(
+        Collection $candidates,
+        Subject $subject,
+        array $excludedFacultyIds,
+        int $hours,
+        array $hoursByFaculty,
+        array $overloadedFacultyIds,
+        int $normalThreshold,
+        int $duration,
+        array $facultyOccupancy,
+        ?int $preferredFacultyId = null
+    ): ?Faculty {
+        $eligibleCandidates = $candidates
+            ->filter(function (Faculty $faculty) use (
+                $subject,
+                $excludedFacultyIds,
+                $hours,
+                $hoursByFaculty,
+                $overloadedFacultyIds,
+                $normalThreshold,
+                $duration,
+                $facultyOccupancy
+            ): bool {
+                if (in_array($faculty->id, $excludedFacultyIds, true)
+                    || in_array($faculty->id, $overloadedFacultyIds, true)
+                    || ($hoursByFaculty[$faculty->id] ?? 0) + $hours > $normalThreshold
+                    || ! $this->hasAvailableSlot($faculty->id, $duration, $facultyOccupancy)) {
+                    return false;
+                }
+
+                $expertise = trim((string) $faculty->subjects);
+                if ($expertise === '') {
+                    return true;
+                }
+
+                return mb_stripos($expertise, $subject->name) !== false
+                    || mb_stripos($expertise, $subject->subject_code) !== false;
+            });
+
+        $preferredFaculty = $preferredFacultyId
+            ? $eligibleCandidates->firstWhere('id', $preferredFacultyId)
+            : null;
+        if ($preferredFaculty) {
+            return $preferredFaculty;
+        }
+
+        return $eligibleCandidates->sort(function (Faculty $left, Faculty $right) use ($hoursByFaculty): int {
+                $loadComparison = ($hoursByFaculty[$left->id] ?? 0) <=> ($hoursByFaculty[$right->id] ?? 0);
+
+                return $loadComparison !== 0
+                    ? $loadComparison
+                    : strcasecmp($left->name, $right->name);
+            })
+            ->first();
+    }
+
+    public function validateAlternativeAssignment(RoomAllocation $allocation, Faculty $faculty): ?string
+    {
+        if (! in_array($allocation->activity_type, ['Practical', 'Tutorial'], true)
+            || ! $allocation->activity_batch
+            || str_ends_with($allocation->activity_batch, '1')) {
+            return 'Only non-mandatory practical and tutorial batches can be reassigned.';
+        }
+
+        if ((int) $faculty->department_id !== (int) $allocation->department_id) {
+            return 'Choose a faculty member from the same department.';
+        }
+
+        $subject = $allocation->subject;
+        if (! $subject) {
+            return 'The subject for this allocation could not be found.';
+        }
+
+        if ((int) $subject->faculty_id === (int) $faculty->id) {
+            return 'The theory faculty must remain assigned to the mandatory first batch.';
+        }
+
+        $theoryFacultyId = $subject->faculty_id
+            ?? RoomAllocation::query()
+                ->where('department_id', $allocation->department_id)
+                ->where('semester', $allocation->semester)
+                ->where('subject_id', $allocation->subject_id)
+                ->where('class_name', $allocation->class_name)
+                ->where('activity_type', 'Lecture')
+                ->value('faculty_id');
+        if ($theoryFacultyId && (int) $theoryFacultyId === (int) $faculty->id) {
+            return 'The theory faculty cannot be assigned to an additional practical or tutorial batch.';
+        }
+
+        $expertise = trim((string) $faculty->subjects);
+        if ($expertise !== ''
+            && mb_stripos($expertise, $subject->name) === false
+            && mb_stripos($expertise, $subject->subject_code) === false) {
+            return 'This faculty member is not listed as eligible for the selected subject.';
+        }
+
+        $hours = match ($allocation->activity_type) {
+            'Practical' => (int) ($subject->lab_credit ?? 0) * 2,
+            'Tutorial' => (int) ($subject->tutorial_credit ?? 0),
+            default => 0,
+        };
+        $workloadData = $this->workloadData();
+        if (in_array($faculty->id, $workloadData['overloaded'], true)) {
+            return 'This faculty member is already over the configured workload limit.';
+        }
+
+        if ($allocation->faculty_id !== $faculty->id) {
+            $hoursByFaculty = $this->assignedHoursByFaculty([], $workloadData['hours']);
+            $normalThreshold = (int) config('faculty_workload.normal_threshold', 18);
+            if (($hoursByFaculty[$faculty->id] ?? 0) + $hours > $normalThreshold) {
+                return 'This assignment would exceed the configured workload limit.';
+            }
+        }
+
+        $facultyOccupancy = $this->facultyOccupancy(
+            [$allocation->department_id.'|'.$allocation->semester.'|'.$allocation->class_name],
+            [$allocation->department_id.'|'.$allocation->semester.'|'.$allocation->division]
+        );
+        $duration = $allocation->activity_type === 'Practical' ? 2 : 1;
+        if (! $this->hasAvailableSlot($faculty->id, $duration, $facultyOccupancy)) {
+            return 'This faculty member has no available timetable slot for this batch.';
+        }
+
+        return null;
     }
 
     public function batchesForSelection(array $selection = []): Collection

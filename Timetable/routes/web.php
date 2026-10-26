@@ -301,6 +301,7 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
                 'faculty' => $entry->faculty ? $entry->faculty->name : '',
                 'room' => $roomName,
                 'type' => $entry->lecture_type,
+                'batch' => $entry->activity_batch,
                 'duration' => $entry->duration,
             ];
         }
@@ -385,28 +386,44 @@ Route::post('/admin/timetable/builder', function (Request $request) {
         'term' => 'required|string',
     ]);
 
+    $allocationWarnings = collect();
     try {
+        $allocationResult = (new FacultyAllocationService)->generateForSelection([
+            'department_id' => $data['department_id'],
+            'semester' => $data['semester'],
+            'division' => $data['division'],
+        ]);
+        $allocationWarnings = collect($allocationResult['warnings'] ?? []);
         $generator = new TimetableGenerator;
         $success = $generator->generate(
             $data['department_id'],
             $data['semester'],
             $data['division'],
             $data['academic_year'],
-            $data['term']
+            $data['term'],
+            false
         );
 
         if (! $success) {
-            return back()->with('error', 'Could not generate timetable. Please ensure subjects exist for this class.')->withInput();
+            return back()
+                ->with('error', 'Could not generate timetable. Please ensure subjects exist for this class.')
+                ->with('faculty_allocation_warnings', $allocationWarnings->unique()->values()->all())
+                ->withInput();
         }
     } catch (Exception $e) {
-        return back()->with('error', $e->getMessage())->withInput();
+        return back()
+            ->with('error', $e->getMessage())
+            ->with('faculty_allocation_warnings', $allocationWarnings->unique()->values()->all())
+            ->withInput();
     }
 
     // Redirect to View Timetable page (which is /admin/timetable via POST)
     // Wait, /admin/timetable accepts POST to view, but we can't redirect with POST data easily.
     // However, /admin/timetable GET route also reads from request query params if passed.
     // Let's redirect to GET /admin/timetable with query params.
-    return redirect('/admin/timetable?department_id='.$data['department_id'].'&semester='.$data['semester'].'&division='.$data['division'].'&academic_year='.$data['academic_year'].'&term='.$data['term'])->with('status', 'Timetable Auto-Generated successfully!');
+    return redirect('/admin/timetable?department_id='.$data['department_id'].'&semester='.$data['semester'].'&division='.$data['division'].'&academic_year='.$data['academic_year'].'&term='.$data['term'])
+        ->with('status', 'Timetable Auto-Generated successfully!')
+        ->with('faculty_allocation_warnings', $allocationWarnings->unique()->values()->all());
 });
 
 // Reports
@@ -779,26 +796,48 @@ Route::post('/admin/faculty-workload/generate', function (Request $request) {
         $allocation = $subjectAllocations->first();
         $faculty = $allocation->faculty;
         $subject = $allocation->subject;
-        $classAllocations = $subjectAllocations
-            ->unique(fn (RoomAllocation $classAllocation): string => $classAllocation->division ?: $classAllocation->class_name);
 
         $lectureHours = 0;
         $tutorialHours = 0;
         $labHours = 0;
 
-        foreach ($classAllocations as $classAllocation) {
-            $class = $classAllocation->division;
-            if (in_array($class, ['A', 'B', 'C'], true)) {
-                $lectureHours += $subject->lectureCreditsForClass($class);
-                $tutorialHours += $subject->tutorialCreditsForClass($class);
-                $labHours += $subject->labCreditsForClass($class) * 2;
+        $activityAllocations = $subjectAllocations->filter(
+            fn (RoomAllocation $classAllocation): bool => filled($classAllocation->activity_type)
+        );
 
-                continue;
+        if ($activityAllocations->isNotEmpty()) {
+            foreach ($activityAllocations as $activityAllocation) {
+                $class = $activityAllocation->division;
+                $lectureHours += $activityAllocation->activity_type === 'Lecture'
+                    ? (in_array($class, ['A', 'B', 'C'], true)
+                        ? $subject->lectureCreditsForClass($class)
+                        : $subject->total_lecture_credits)
+                    : 0;
+                $tutorialHours += $activityAllocation->activity_type === 'Tutorial'
+                    ? (int) ($subject->tutorial_credit ?? 0)
+                    : 0;
+                $labHours += $activityAllocation->activity_type === 'Practical'
+                    ? (int) ($subject->lab_credit ?? 0) * 2
+                    : 0;
             }
+        } else {
+            $classAllocations = $subjectAllocations
+                ->unique(fn (RoomAllocation $classAllocation): string => $classAllocation->division ?: $classAllocation->class_name);
 
-            $lectureHours += $subject->total_lecture_credits;
-            $tutorialHours += $subject->total_tutorial_credits;
-            $labHours += $subject->total_lab_credits * 2;
+            foreach ($classAllocations as $classAllocation) {
+                $class = $classAllocation->division;
+                if (in_array($class, ['A', 'B', 'C'], true)) {
+                    $lectureHours += $subject->lectureCreditsForClass($class);
+                    $tutorialHours += $subject->tutorialCreditsForClass($class);
+                    $labHours += $subject->labCreditsForClass($class) * 2;
+
+                    continue;
+                }
+
+                $lectureHours += $subject->total_lecture_credits;
+                $tutorialHours += $subject->total_tutorial_credits;
+                $labHours += $subject->total_lab_credits * 2;
+            }
         }
 
         $weeklyHours = $lectureHours + $tutorialHours + $labHours;
@@ -1558,7 +1597,77 @@ Route::get('/admin/faculty-allocation', function (Request $request, FacultyAlloc
     ]);
 });
 
-Route::post('/admin/faculty-allocation/generate', function (Request $request, FacultyAllocationService $service) {
+Route::post('/admin/faculty-allocation/{id}/faculty', function (
+    Request $request,
+    int $id,
+    FacultyAllocationService $service,
+    TimetableGenerator $timetableGenerator
+) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $allocation = RoomAllocation::with('subject')->findOrFail($id);
+    $data = $request->validate([
+        'faculty_id' => 'required|integer|exists:faculties,id',
+    ]);
+    $faculty = Faculty::findOrFail($data['faculty_id']);
+    $validationMessage = $service->validateAlternativeAssignment($allocation, $faculty);
+
+    if ($validationMessage) {
+        return back()->with('faculty_allocation_error', $validationMessage);
+    }
+
+    $existingTimetables = TimetableEntry::query()
+        ->select(['department_id', 'semester', 'division', 'academic_year', 'term'])
+        ->where('department_id', $allocation->department_id)
+        ->where('semester', $allocation->semester)
+        ->where('division', $allocation->division)
+        ->distinct()
+        ->get();
+
+    try {
+        DB::transaction(function () use ($allocation, $faculty, $existingTimetables, $timetableGenerator): void {
+            $allocation->update(['faculty_id' => $faculty->id]);
+
+            foreach ($existingTimetables as $timetable) {
+                $success = $timetableGenerator->generate(
+                    (int) $timetable->department_id,
+                    (string) $timetable->semester,
+                    (string) $timetable->division,
+                    (string) $timetable->academic_year,
+                    (string) $timetable->term,
+                    false
+                );
+
+                if (! $success) {
+                    throw new Exception("The timetable for {$timetable->division} could not be refreshed.");
+                }
+            }
+        });
+    } catch (Exception $exception) {
+        return back()->with(
+            'faculty_allocation_error',
+            "The faculty change was not saved because the timetable could not be refreshed: {$exception->getMessage()}"
+        );
+    }
+
+    $query = http_build_query([
+        'department_id' => $allocation->department_id,
+        'semester' => $allocation->semester,
+        'division' => $allocation->division,
+        'batch' => $allocation->department_id.'|'.$allocation->semester.'|'.$allocation->division,
+    ]);
+
+    return redirect('/admin/faculty-allocation?'.$query)
+        ->with('faculty_allocation_status', 'Faculty assignment updated successfully.');
+});
+
+Route::post('/admin/faculty-allocation/generate', function (
+    Request $request,
+    FacultyAllocationService $service,
+    TimetableGenerator $timetableGenerator
+) {
     if (! session('admin.auth')) {
         return redirect('/admin/login');
     }
@@ -1571,6 +1680,33 @@ Route::post('/admin/faculty-allocation/generate', function (Request $request, Fa
     ];
 
     $result = $service->generateForSelection($selection);
+    $warnings = collect($result['warnings'] ?? []);
+    $existingTimetables = TimetableEntry::query()
+        ->select(['department_id', 'semester', 'division', 'academic_year', 'term'])
+        ->where('department_id', $selection['department_id'])
+        ->where('semester', $selection['semester'])
+        ->when(filled($selection['division']), fn ($query) => $query->where('division', $selection['division']))
+        ->distinct()
+        ->get();
+
+    foreach ($existingTimetables as $timetable) {
+        try {
+            $timetableGenerator->generate(
+                (int) $timetable->department_id,
+                (string) $timetable->semester,
+                (string) $timetable->division,
+                (string) $timetable->academic_year,
+                (string) $timetable->term,
+                false
+            );
+        } catch (Exception $exception) {
+            $warnings->push(
+                "Existing timetable for {$timetable->division} could not be refreshed: {$exception->getMessage()}"
+            );
+        }
+    }
+
+    $result['warnings'] = $warnings->unique()->values();
 
     if ($request->expectsJson()) {
         return response()->json($result);
@@ -1705,6 +1841,7 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
 
     // Build allocations query — filter by dept/semester/division/batch when query params are present
     $allocQuery = RoomAllocation::with(['department', 'subject', 'faculty', 'classroom', 'secondClassroom'])
+        ->whereNull('activity_type')
         ->orderBy('id', 'desc');
 
     if ($request->filled('department_id')) {
@@ -1728,14 +1865,18 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
 
     $allocations = $allocQuery->paginate(15)->withQueryString();
 
-    $totalSubjects = RoomAllocation::count();
+    $totalSubjects = RoomAllocation::whereNull('activity_type')->count();
     $allocatedClassroomCount = RoomAllocation::where('status', 'Allocated')
+        ->whereNull('activity_type')
         ->where(function ($q) {
             $q->where('allocation_type', 'Classroom')->orWhereNull('allocation_type');
         })->count();
     $allocatedLabCount = RoomAllocation::where('status', 'Allocated')
+        ->whereNull('activity_type')
         ->where('allocation_type', 'Lab')->count();
-    $unallocatedCount = RoomAllocation::where('status', 'Unallocated')->count();
+    $unallocatedCount = RoomAllocation::where('status', 'Unallocated')
+        ->whereNull('activity_type')
+        ->count();
 
     return view('admin.classrooms.allocation', [
         'departments' => $departments,

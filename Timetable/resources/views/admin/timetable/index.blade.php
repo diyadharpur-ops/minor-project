@@ -20,6 +20,13 @@
         @if(session('error'))
             <div class="alert alert-danger" style="background-color: #f8d7da; color: #842029; padding: 15px; border-radius: 4px; border: 1px solid #f5c2c7; font-weight: bold; margin-bottom: 15px;">{{ session('error') }}</div>
         @endif
+        @if(session('faculty_allocation_warnings'))
+            <div class="alert" style="background-color: #fff7ed; color: #9a4d00; padding: 15px; border-radius: 4px; border: 1px solid #fed7aa; margin-bottom: 15px;">
+                @foreach(session('faculty_allocation_warnings') as $warning)
+                    <div>{{ $warning }}</div>
+                @endforeach
+            </div>
+        @endif
         
         <form method="POST" action="/admin/timetable" style="display: flex; gap: 10px; align-items: flex-end;">
             @csrf
@@ -325,7 +332,7 @@
                                             @endif
                                         </span>
                                         <span class="faculty-name">{{ $entry['faculty'] }}</span>
-                                        <span class="room-type">{{ $entry['room'] }} ({{ strtoupper($entry['type']) }})</span>
+                                        <span class="room-type">{{ $entry['room'] }} ({{ strtoupper($entry['type']) }}{{ ! empty($entry['batch']) ? ' - '.strtoupper($entry['batch']) : '' }})</span>
                                     @else
                                         -
                                     @endif

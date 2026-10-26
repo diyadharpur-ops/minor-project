@@ -5,6 +5,7 @@ use App\Models\Faculty;
 use App\Models\FacultyWorkload;
 use App\Models\RoomAllocation;
 use App\Models\Subject;
+use App\Models\TimetableEntry;
 use App\Models\User;
 use App\Services\FacultyAllocationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -134,6 +135,178 @@ test('faculty allocation service balances workload across faculty for the same s
     expect($result['count'])->toBe(4)
         ->and($groupedLoads)->toHaveCount(3)
         ->and(max($groupedLoads) - min($groupedLoads))->toBeLessThanOrEqual(4);
+});
+
+test('faculty allocation assigns theory faculty to A1 and AT1 and fairly distributes remaining groups', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+
+    $theoryFaculty = Faculty::create([
+        'name' => 'Dr. Theory',
+        'email' => 'theory@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+
+    $otherFaculty = collect(['B', 'C', 'D'])->map(fn (string $name): Faculty => Faculty::create([
+        'name' => "Dr. {$name}",
+        'email' => strtolower($name).'@example.com',
+        'designation' => 'Assistant Professor',
+        'department_id' => $department->id,
+    ]));
+
+    $subject = Subject::create([
+        'name' => 'Data Structures',
+        'subject_code' => 'CS-301',
+        'semester' => '3',
+        'department_id' => $department->id,
+        'faculty_id' => $theoryFaculty->id,
+        'lecture_credit' => 2,
+        'lab_credit' => 1,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1', 'A2', 'A3', 'A4'],
+        'tutorial_selections' => ['AT1', 'AT2'],
+    ]);
+
+    $result = (new FacultyAllocationService)->generateForSelection([
+        'department_id' => $department->id,
+        'semester' => '3',
+        'division' => 'A',
+    ]);
+
+    $assignments = RoomAllocation::query()
+        ->where('subject_id', $subject->id)
+        ->where('class_name', 'Computer Science-3-A')
+        ->get()
+        ->keyBy(fn (RoomAllocation $allocation): string => $allocation->activity_type.'|'.($allocation->activity_batch ?? ''));
+
+    expect($result['warnings'])->toBeEmpty()
+        ->and($assignments)->toHaveCount(7)
+        ->and($assignments->get('Lecture|')->faculty_id)->toBe($theoryFaculty->id)
+        ->and($assignments->get('Practical|A1')->faculty_id)->toBe($theoryFaculty->id)
+        ->and($assignments->get('Tutorial|AT1')->faculty_id)->toBe($theoryFaculty->id)
+        ->and($assignments->get('Practical|A2')->faculty_id)->not->toBe($theoryFaculty->id)
+        ->and($assignments->get('Practical|A3')->faculty_id)->not->toBe($theoryFaculty->id)
+        ->and($assignments->get('Practical|A4')->faculty_id)->not->toBe($theoryFaculty->id)
+        ->and($assignments->get('Tutorial|AT2')->faculty_id)->not->toBe($theoryFaculty->id);
+
+    $alternativeLoadCounts = $assignments
+        ->filter(fn (RoomAllocation $allocation): bool => $allocation->activity_batch !== null
+            && ! in_array($allocation->faculty_id, [$theoryFaculty->id, null], true))
+        ->countBy('faculty_id')
+        ->values();
+
+    expect($alternativeLoadCounts->max() - $alternativeLoadCounts->min())->toBeLessThanOrEqual(1)
+        ->and($otherFaculty->pluck('id'))->toContain($assignments->get('Practical|A2')->faculty_id);
+
+    $administratorFacultyId = $otherFaculty->last()->id;
+    $assignments->get('Practical|A2')->update(['faculty_id' => $administratorFacultyId]);
+    (new FacultyAllocationService)->generateForSelection([
+        'department_id' => $department->id,
+        'semester' => '3',
+        'division' => 'A',
+    ]);
+
+    expect($assignments->get('Practical|A2')->fresh()->faculty_id)->toBe($administratorFacultyId);
+});
+
+test('faculty allocation preserves mandatory assignments and warns when there is no eligible alternative', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $theoryFaculty = Faculty::create([
+        'name' => 'Dr. Theory',
+        'email' => 'theory@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+    $subject = Subject::create([
+        'name' => 'Data Structures',
+        'subject_code' => 'CS-301',
+        'semester' => '3',
+        'department_id' => $department->id,
+        'faculty_id' => $theoryFaculty->id,
+        'lecture_credit' => 2,
+        'lab_credit' => 1,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1', 'A2'],
+        'tutorial_selections' => ['AT1', 'AT2'],
+    ]);
+
+    $result = (new FacultyAllocationService)->generateForSelection([
+        'department_id' => $department->id,
+        'semester' => '3',
+        'division' => 'A',
+    ]);
+    $assignments = RoomAllocation::query()->where('subject_id', $subject->id)->get()
+        ->keyBy(fn (RoomAllocation $allocation): string => $allocation->activity_type.'|'.($allocation->activity_batch ?? ''));
+
+    expect($assignments->get('Practical|A1')->faculty_id)->toBe($theoryFaculty->id)
+        ->and($assignments->get('Tutorial|AT1')->faculty_id)->toBe($theoryFaculty->id)
+        ->and($assignments->get('Practical|A2')->faculty_id)->toBeNull()
+        ->and($assignments->get('Tutorial|AT2')->faculty_id)->toBeNull()
+        ->and($result['warnings']->join(' '))->toContain('No eligible faculty within workload limits');
+});
+
+test('faculty allocation warns when mandatory theory faculty has no available practical or tutorial slot', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $theoryFaculty = Faculty::create([
+        'name' => 'Dr. Theory',
+        'email' => 'theory@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+    $subject = Subject::create([
+        'name' => 'Data Structures',
+        'subject_code' => 'CS-301',
+        'semester' => '3',
+        'department_id' => $department->id,
+        'faculty_id' => $theoryFaculty->id,
+        'lecture_credit' => 2,
+        'lab_credit' => 1,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1'],
+        'tutorial_selections' => ['AT1'],
+    ]);
+
+    foreach (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as $day) {
+        foreach (['10:30-11:30', '11:30-12:30', '01:00-02:00', '02:00-03:00', '03:10-04:10', '04:10-05:10'] as $timeSlot) {
+            TimetableEntry::create([
+                'department_id' => $department->id,
+                'semester' => '3',
+                'division' => 'B',
+                'academic_year' => '2026-2027',
+                'term' => 'Odd',
+                'day' => $day,
+                'time_slot' => $timeSlot,
+                'subject_id' => $subject->id,
+                'faculty_id' => $theoryFaculty->id,
+                'lecture_type' => 'Lecture',
+                'duration' => 1,
+            ]);
+        }
+    }
+
+    $result = (new FacultyAllocationService)->generateForSelection([
+        'department_id' => $department->id,
+        'semester' => '3',
+        'division' => 'A',
+    ]);
+    $assignments = RoomAllocation::query()->where('subject_id', $subject->id)->get()
+        ->keyBy(fn (RoomAllocation $allocation): string => $allocation->activity_type.'|'.($allocation->activity_batch ?? ''));
+
+    expect($assignments->get('Practical|A1')->faculty_id)->toBe($theoryFaculty->id)
+        ->and($assignments->get('Tutorial|AT1')->faculty_id)->toBe($theoryFaculty->id)
+        ->and($result['warnings']->join(' '))->toContain('conflicts with the theory faculty\'s existing timetable');
 });
 
 test('admin faculty allocation page derives semester and division options from available batches and shows lecture lab tutorial details', function () {

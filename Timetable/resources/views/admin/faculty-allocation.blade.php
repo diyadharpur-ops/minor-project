@@ -51,6 +51,10 @@
             <div class="status-note">{{ session('faculty_allocation_status') }}</div>
         @endif
 
+        @if (session('faculty_allocation_error'))
+            <div class="warning-box">{{ session('faculty_allocation_error') }}</div>
+        @endif
+
         @if (session('faculty_allocation_warnings'))
             <div class="warning-box">
                 @foreach (session('faculty_allocation_warnings') as $warning)
@@ -145,37 +149,59 @@
                             <tr>
                                 <th>Subject</th>
                                 <th>Subject Type</th>
+                                <th>Batch</th>
                                 <th>Faculty</th>
                                 <th>Weekly Hours</th>
                                 <th>Allocation Type</th>
+                                <th>Assignment</th>
                             </tr>
                         </thead>
                         <tbody>
                             @foreach ($allocations as $allocation)
                                 @php
                                     $subject = $allocation->subject;
-                                    $facultyName = $allocation->faculty?->name ?? ($subject?->faculty?->name ?? '—');
+                                    $facultyName = $allocation->activity_type
+                                        ? ($allocation->faculty?->name ?? '—')
+                                        : ($allocation->faculty?->name ?? ($subject?->faculty?->name ?? '—'));
                                     $className = $allocation->division;
-                                    $allocationRows = collect([
-                                        [
-                                            'type' => 'Lecture',
-                                            'hours' => $className
-                                                ? ($subject?->lectureCreditsForClass($className) ?? 0)
-                                                : ($subject?->total_lecture_credits ?? 0),
-                                        ],
-                                        [
-                                            'type' => 'Lab',
-                                            'hours' => $className
-                                                ? (($subject?->labCreditsForClass($className) ?? 0) * 2)
-                                                : ($subject?->lab_weekly_hours ?? 0),
-                                        ],
-                                        [
-                                            'type' => 'Tutorial',
-                                            'hours' => $className
-                                                ? ($subject?->tutorialCreditsForClass($className) ?? 0)
-                                                : ($subject?->total_tutorial_credits ?? 0),
-                                        ],
-                                    ])->filter(fn (array $row): bool => $row['hours'] > 0);
+                                    $theoryFacultyId = $subject?->faculty_id
+                                        ?? $allocations->first(fn ($candidate) => $candidate->subject_id === $allocation->subject_id
+                                            && $candidate->activity_type === 'Lecture')?->faculty_id;
+                                    if ($allocation->activity_type) {
+                                        $allocationRows = collect([[
+                                            'type' => $allocation->activity_type === 'Practical' ? 'Practical' : $allocation->activity_type,
+                                            'batch' => $allocation->activity_batch,
+                                            'hours' => match ($allocation->activity_type) {
+                                                'Lecture' => $className
+                                                    ? ($subject?->lectureCreditsForClass($className) ?? 0)
+                                                    : ($subject?->total_lecture_credits ?? 0),
+                                                'Practical' => (int) ($subject?->lab_credit ?? 0) * 2,
+                                                'Tutorial' => (int) ($subject?->tutorial_credit ?? 0),
+                                                default => 0,
+                                            },
+                                        ]])->filter(fn (array $row): bool => $row['hours'] > 0);
+                                    } else {
+                                        $allocationRows = collect([
+                                            [
+                                                'type' => 'Lecture',
+                                                'hours' => $className
+                                                    ? ($subject?->lectureCreditsForClass($className) ?? 0)
+                                                    : ($subject?->total_lecture_credits ?? 0),
+                                            ],
+                                            [
+                                                'type' => 'Lab',
+                                                'hours' => $className
+                                                    ? (($subject?->labCreditsForClass($className) ?? 0) * 2)
+                                                    : ($subject?->lab_weekly_hours ?? 0),
+                                            ],
+                                            [
+                                                'type' => 'Tutorial',
+                                                'hours' => $className
+                                                    ? ($subject?->tutorialCreditsForClass($className) ?? 0)
+                                                    : ($subject?->total_tutorial_credits ?? 0),
+                                            ],
+                                        ])->filter(fn (array $row): bool => $row['hours'] > 0);
+                                    }
 
                                     if ($allocationRows->isEmpty() && $subject) {
                                         $subTypeRaw = strtolower((string) $subject->subject_type);
@@ -183,6 +209,7 @@
                                         $allocationRows = collect([
                                             [
                                                 'type' => $detectedType,
+                                                'batch' => null,
                                                 'hours' => (int) ($className
                                                     ? $subject->weeklyHoursForClass($className)
                                                     : $subject->weekly_hours),
@@ -194,16 +221,37 @@
                                     @php
                                         $allocType = match ($allocationRow['type']) {
                                             'Lecture', 'Tutorial' => 'Classroom',
-                                            'Lab' => 'Lab',
+                                            'Lab', 'Practical' => 'Lab',
                                             default => 'Classroom',
                                         };
                                     @endphp
                                     <tr>
                                         <td>{{ $subject?->name ?? '—' }}</td>
                                         <td>{{ $allocationRow['type'] }}</td>
+                                        <td>{{ $allocationRow['batch'] ?? '—' }}</td>
                                         <td>{{ $facultyName }}</td>
                                         <td>{{ $allocationRow['hours'] }} {{ $allocationRow['hours'] === 1 ? 'Hour' : 'Hours' }}</td>
                                         <td>{{ $allocType }}</td>
+                                        <td>
+                                            @if (in_array($allocation->activity_type, ['Practical', 'Tutorial'], true) && $allocation->activity_batch && ! str_ends_with($allocation->activity_batch, '1'))
+                                                <form method="POST" action="{{ url('/admin/faculty-allocation/'.$allocation->id.'/faculty') }}">
+                                                    @csrf
+                                                    <select name="faculty_id" required>
+                                                        <option value="">Select faculty</option>
+                                                        @foreach ($faculties->where('department_id', $allocation->department_id)->reject(fn ($faculty) => (int) $faculty->id === (int) $theoryFacultyId) as $facultyOption)
+                                                            <option value="{{ $facultyOption->id }}" @selected((int) $allocation->faculty_id === (int) $facultyOption->id)>
+                                                                {{ $facultyOption->name }}
+                                                            </option>
+                                                        @endforeach
+                                                    </select>
+                                                    <button type="submit" class="btn-primary">Save</button>
+                                                </form>
+                                            @elseif ($allocation->activity_type && $allocation->activity_batch && str_ends_with($allocation->activity_batch, '1'))
+                                                <span class="muted">Theory faculty required</span>
+                                            @else
+                                                <span class="muted">—</span>
+                                            @endif
+                                        </td>
                                     </tr>
                                 @endforeach
                             @endforeach

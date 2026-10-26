@@ -35,6 +35,13 @@
     @if(session('error'))
         <div class="alert alert-danger">{{ session('error') }}</div>
     @endif
+    @if(session('faculty_allocation_warnings'))
+        <div class="alert" style="background:#fff7ed;color:#9a4d00;">
+            @foreach(session('faculty_allocation_warnings') as $warning)
+                <div>{{ $warning }}</div>
+            @endforeach
+        </div>
+    @endif
 
     <form method="POST" action="/admin/timetable/builder">
         @csrf
