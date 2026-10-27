@@ -7,6 +7,7 @@ use App\Models\Department;
 use App\Models\Division;
 use App\Models\Faculty;
 use App\Models\FacultyWorkload;
+use App\Models\LabAllocationGroup;
 use App\Models\Notification;
 use App\Models\RoomAllocation;
 use App\Models\Subject;
@@ -1758,12 +1759,58 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
         ->orderBy('semester')
         ->pluck('semester');
 
-    $divisionsMap = Division::getDivisionsMap($semesters);
-    $selectedSem = (string) $request->input('semester');
-    if (filled($selectedSem) && isset($divisionsMap[$selectedSem])) {
-        $divisions = collect($divisionsMap[$selectedSem]);
+    $semestersMap = Subject::query()
+        ->whereNotNull('semester')
+        ->select(['department_id', 'semester'])
+        ->distinct()
+        ->orderBy('semester')
+        ->get()
+        ->groupBy('department_id')
+        ->map(fn ($departmentSubjects) => $departmentSubjects->pluck('semester')->values())
+        ->all();
+
+    $classesMap = [];
+    foreach ($departments as $department) {
+        $departmentSemesterClasses = [];
+        foreach ($semesters as $semester) {
+            $departmentSemesterClasses[(string) $semester] = $allocationService->classesForSelection((int) $department->id, (string) $semester);
+        }
+        $classesMap[(string) $department->id] = $departmentSemesterClasses;
+    }
+    $divisionsMap = [];
+    foreach ($classesMap as $departmentId => $departmentSemesters) {
+        foreach ($departmentSemesters as $semester => $classNames) {
+            foreach ($classNames as $className) {
+                $divisionsMap[$departmentId][$semester][$className] = $allocationService->divisionsForSelection(
+                    (int) $departmentId,
+                    (string) $semester,
+                    (string) $className
+                );
+            }
+        }
+    }
+
+    $subjectOptionsMap = Subject::query()
+        ->orderBy('name')
+        ->get(['id', 'name', 'department_id', 'semester'])
+        ->groupBy('department_id')
+        ->map(fn ($departmentSubjects) => $departmentSubjects
+            ->groupBy('semester')
+            ->map(fn ($semesterSubjects) => $semesterSubjects
+                ->map(fn (Subject $subject): array => ['id' => $subject->id, 'name' => $subject->name])
+                ->values()))
+        ->all();
+
+    $selectedDepartmentId = (int) ($request->input('department_id') ?? 0);
+    $selectedSemester = (string) ($request->input('semester') ?? '');
+    $selectedClass = (string) ($request->input('class') ?? $request->input('class_name') ?? $request->input('division') ?? '');
+
+    if ($selectedDepartmentId > 0 && $selectedSemester !== '') {
+        $classes = collect($classesMap[(string) $selectedDepartmentId][(string) $selectedSemester] ?? []);
+    } elseif ($selectedDepartmentId > 0) {
+        $classes = collect($classesMap[(string) $selectedDepartmentId] ?? [])->flatten()->unique()->sort(SORT_NATURAL)->values();
     } else {
-        $divisions = collect(Division::getAllActiveDivisions($semesters));
+        $classes = collect($classesMap)->flatten(1)->flatten()->unique()->sort(SORT_NATURAL)->values();
     }
 
     $academicYears = TimetableEntry::query()
@@ -1795,15 +1842,121 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     }
 
     if ($request->isMethod('post')) {
+        if ($request->input('form_type') === 'save-lab-group') {
+            $data = $request->validate([
+                'department_id' => 'required|integer|exists:departments,id',
+                'semester' => 'required|string|max:20',
+                'class_name' => 'required|string|max:20',
+                'group_name' => 'required|string|max:80',
+                'divisions' => 'required|array|min:1',
+                'divisions.*' => 'required|string|distinct',
+                'classroom_id' => 'required|integer|exists:classrooms,id',
+            ]);
+
+            $availableClasses = $allocationService->classesForSelection(
+                (int) $data['department_id'],
+                (string) $data['semester']
+            );
+            if (! in_array($data['class_name'], $availableClasses, true)) {
+                throw ValidationException::withMessages([
+                    'class_name' => 'Choose a class that has subjects in the selected semester.',
+                ]);
+            }
+
+            $availableDivisions = $allocationService->divisionsForSelection(
+                (int) $data['department_id'],
+                (string) $data['semester'],
+                (string) $data['class_name']
+            );
+            if (array_diff($data['divisions'], $availableDivisions) !== []) {
+                throw ValidationException::withMessages([
+                    'divisions' => 'Every division must be selected for this class in Manage Subjects.',
+                ]);
+            }
+
+            $lab = Classroom::query()
+                ->whereKey($data['classroom_id'])
+                ->where('availability', 'Available')
+                ->where('room_type', 'like', '%lab%')
+                ->first();
+            if (! $lab) {
+                throw ValidationException::withMessages([
+                    'classroom_id' => 'Choose an available laboratory from the existing room records.',
+                ]);
+            }
+
+            $existingGroups = LabAllocationGroup::query()
+                ->where('department_id', $data['department_id'])
+                ->where('semester', $data['semester'])
+                ->where('class_name', $data['class_name'])
+                ->get();
+            $alreadyGroupedDivisions = $existingGroups
+                ->flatMap(fn (LabAllocationGroup $group): array => $group->divisions ?? [])
+                ->all();
+            if (array_intersect($data['divisions'], $alreadyGroupedDivisions) !== []) {
+                throw ValidationException::withMessages([
+                    'divisions' => 'A division can belong to only one configured lab group. Remove its existing group first.',
+                ]);
+            }
+
+            $combinedStrength = $allocationService->studentStrengthForDivisions(
+                (int) $data['department_id'],
+                (string) $data['semester'],
+                (string) $data['class_name'],
+                $data['divisions']
+            );
+            if ($lab->room_capacity < $combinedStrength) {
+                throw ValidationException::withMessages([
+                    'classroom_id' => "The selected laboratory capacity ({$lab->room_capacity}) is below the combined division strength ({$combinedStrength}).",
+                ]);
+            }
+
+            $groupNameExists = $existingGroups->contains(
+                fn (LabAllocationGroup $group): bool => mb_strtolower($group->group_name) === mb_strtolower($data['group_name'])
+            );
+            if ($groupNameExists) {
+                throw ValidationException::withMessages([
+                    'group_name' => 'This lab group name already exists for the selected class and semester.',
+                ]);
+            }
+
+            LabAllocationGroup::create([
+                'department_id' => $data['department_id'],
+                'semester' => $data['semester'],
+                'class_name' => $data['class_name'],
+                'group_name' => $data['group_name'],
+                'divisions' => $data['divisions'],
+                'classroom_id' => $lab->id,
+            ]);
+
+            return redirect('/admin/classroom-allocation?'.http_build_query([
+                'department_id' => $data['department_id'],
+                'semester' => $data['semester'],
+                'class' => $data['class_name'],
+            ]))->with('allocation_status', 'Lab sharing group saved successfully.');
+        }
+
         if ($request->input('form_type') === 'filtered-auto-allocate') {
             $data = $request->validate([
                 'department_id' => 'required|integer|exists:departments,id',
                 'semester' => 'required|string|max:10',
-                'division' => 'nullable|string|max:10',
+                'class' => 'required|string|max:20',
+                'class_name' => 'nullable|string|max:20',
+                'division' => 'nullable|string|max:20',
                 'batch' => 'nullable|string|max:255',
                 'term' => 'nullable|string|max:20',
                 'academic_year' => 'nullable|string|max:20',
             ]);
+            $data['class'] = $data['class'] ?? $data['class_name'] ?? $data['division'] ?? null;
+            if (! in_array(
+                $data['class'],
+                $allocationService->classesForSelection((int) $data['department_id'], (string) $data['semester']),
+                true
+            )) {
+                throw ValidationException::withMessages([
+                    'class' => 'Choose a class that has subjects in the selected semester.',
+                ]);
+            }
             $result = $allocationService->generateForSelection($data);
 
             if ($result['allocatedClassrooms'] > 0) {
@@ -1816,12 +1969,17 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
             $redirectParams = array_filter([
                 'department_id' => $data['department_id'],
                 'semester' => $data['semester'],
+                'class' => $data['class'] ?? null,
                 'division' => $data['division'] ?? null,
                 'batch' => $data['batch'] ?? null,
             ]);
+            $statusMessage = "Generated {$result['created']} allocation records.";
+            if ($result['unallocated'] > 0) {
+                $statusMessage .= " {$result['unallocated']} allocations have no suitable available room; review their Unallocated status.";
+            }
 
             return redirect('/admin/classroom-allocation?'.http_build_query($redirectParams))
-                ->with('allocation_status', "Generated {$result['created']} allocation records.");
+                ->with('allocation_status', $statusMessage);
         }
 
         if ($request->input('form_type') === 'auto-allocate' || $request->input('form_type') === 're-generate') {
@@ -1834,14 +1992,21 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
                 Notification::trigger('Lab Allocation Completed', ['count' => $result['allocatedLabs']]);
             }
 
+            $statusMessage = "Generated {$result['created']} allocation records.";
+            if ($result['unallocated'] > 0) {
+                $statusMessage .= " {$result['unallocated']} allocations have no suitable available room; review their Unallocated status.";
+            }
+
             return redirect('/admin/classroom-allocation')
-                ->with('allocation_status', "Generated {$result['created']} allocation records.");
+                ->with('allocation_status', $statusMessage);
         }
     }
 
     // Build allocations query — filter by dept/semester/division/batch when query params are present
+    $hasActivityTypeColumn = Schema::hasColumn('room_allocations', 'activity_type');
+
     $allocQuery = RoomAllocation::with(['department', 'subject', 'faculty', 'classroom', 'secondClassroom'])
-        ->whereNull('activity_type')
+        ->when($hasActivityTypeColumn, fn ($query) => $query->whereNull('activity_type'))
         ->orderBy('id', 'desc');
 
     if ($request->filled('department_id')) {
@@ -1850,8 +2015,15 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     if ($request->filled('semester')) {
         $allocQuery->where('semester', $request->input('semester'));
     }
-    if ($request->filled('division')) {
-        $allocQuery->where('class_name', 'like', '%'.$request->input('division').'%');
+    $selectedClassFilter = $request->input('class') ?? $request->input('class_name');
+    if (filled($selectedClassFilter)) {
+        $allocQuery->where('class_name', $selectedClassFilter);
+    }
+    if ($request->filled('division_filter')) {
+        $allocQuery->where('division', $request->input('division_filter'));
+    }
+    if ($request->filled('subject_id')) {
+        $allocQuery->where('subject_id', $request->input('subject_id'));
     }
     if ($request->filled('batch')) {
         $batchKey = $request->input('batch');
@@ -1864,25 +2036,74 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     }
 
     $allocations = $allocQuery->paginate(15)->withQueryString();
+    $selectedDivisions = filled($selectedDepartmentId) && $selectedSemester !== '' && $selectedClass !== ''
+        ? $allocationService->divisionsForSelection($selectedDepartmentId, $selectedSemester, $selectedClass)
+        : [];
+    $subjectOptions = Subject::query()
+        ->when(filled($request->input('department_id')), fn ($query) => $query->where('department_id', $request->input('department_id')))
+        ->when(filled($request->input('semester')), fn ($query) => $query->where('semester', $request->input('semester')))
+        ->orderBy('name')
+        ->get(['id', 'name']);
+    $labGroups = filled($selectedDepartmentId) && $selectedSemester !== '' && $selectedClass !== ''
+        ? LabAllocationGroup::query()
+            ->with('classroom')
+            ->where('department_id', $selectedDepartmentId)
+            ->where('semester', $selectedSemester)
+            ->where('class_name', $selectedClass)
+            ->orderBy('group_name')
+            ->get()
+        : collect();
+    $availableLabs = Classroom::query()
+        ->where('availability', 'Available')
+        ->where('room_type', 'like', '%lab%')
+        ->orderBy('room_number')
+        ->get(['id', 'room_number', 'room_capacity']);
 
-    $totalSubjects = RoomAllocation::whereNull('activity_type')->count();
-    $allocatedClassroomCount = RoomAllocation::where('status', 'Allocated')
-        ->whereNull('activity_type')
-        ->where(function ($q) {
-            $q->where('allocation_type', 'Classroom')->orWhereNull('allocation_type');
-        })->count();
-    $allocatedLabCount = RoomAllocation::where('status', 'Allocated')
-        ->whereNull('activity_type')
-        ->where('allocation_type', 'Lab')->count();
-    $unallocatedCount = RoomAllocation::where('status', 'Unallocated')
-        ->whereNull('activity_type')
+    $hasActivityTypeColumn = Schema::hasColumn('room_allocations', 'activity_type');
+    $hasAllocationType = Schema::hasColumn('room_allocations', 'allocation_type');
+
+    $totalSubjects = RoomAllocation::query()
+        ->when($hasActivityTypeColumn, fn ($query) => $query->whereNull('activity_type'))
+        ->count();
+
+    $allocatedClassroomCount = RoomAllocation::query()
+        ->where('status', 'Allocated')
+        ->when($hasActivityTypeColumn, fn ($query) => $query->whereNull('activity_type'))
+        ->when($hasAllocationType, function ($query) {
+            $query->where(function ($q) {
+                $q->where('allocation_type', 'Classroom')->orWhereNull('allocation_type');
+            });
+        })
+        ->count();
+
+    $allocatedLabCount = RoomAllocation::query()
+        ->where('status', 'Allocated')
+        ->when($hasActivityTypeColumn, fn ($query) => $query->whereNull('activity_type'))
+        ->when($hasAllocationType, fn ($query) => $query->where('allocation_type', 'Lab'))
+        ->count();
+
+    $unallocatedCount = RoomAllocation::query()
+        ->where('status', 'Unallocated')
+        ->when($hasActivityTypeColumn, fn ($query) => $query->whereNull('activity_type'))
         ->count();
 
     return view('admin.classrooms.allocation', [
         'departments' => $departments,
         'semesters' => $semesters,
-        'divisions' => $divisions,
+        'semestersMap' => $semestersMap,
+        'classesMap' => $classesMap,
         'divisionsMap' => $divisionsMap,
+        'subjectOptionsMap' => $subjectOptionsMap,
+        'classes' => $classes,
+        'selectedDepartmentId' => $selectedDepartmentId,
+        'selectedSemester' => $selectedSemester,
+        'selectedClass' => $selectedClass,
+        'selectedDivisions' => $selectedDivisions,
+        'selectedDivisionFilter' => $request->input('division_filter'),
+        'selectedSubjectId' => $request->input('subject_id'),
+        'subjectOptions' => $subjectOptions,
+        'labGroups' => $labGroups,
+        'availableLabs' => $availableLabs,
         'batches' => $batches,
         'academicYears' => $academicYears,
         'terms' => $terms,
@@ -1892,6 +2113,23 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
         'allocatedLabCount' => $allocatedLabCount,
         'unallocatedCount' => $unallocatedCount,
     ]);
+});
+
+Route::post('/admin/classroom-allocation/lab-groups/{id}/delete', function (int $id) {
+    if (! session('admin.auth')) {
+        return redirect('/admin/login');
+    }
+
+    $group = LabAllocationGroup::findOrFail($id);
+    $selection = [
+        'department_id' => $group->department_id,
+        'semester' => $group->semester,
+        'class' => $group->class_name,
+    ];
+    $group->delete();
+
+    return redirect('/admin/classroom-allocation?'.http_build_query($selection))
+        ->with('allocation_status', 'Lab sharing group removed. Existing allocations will use separate division labs when generated again.');
 });
 
 Route::post('/admin/classroom-allocation/{id}/delete-room', function ($id) {

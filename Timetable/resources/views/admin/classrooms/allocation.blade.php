@@ -227,7 +227,7 @@
         <div class="filter-row">
             <div class="filter-group">
                 <label>Department</label>
-                <select name="department_id" required onchange="submitFilteredAllocationWhenReady()">
+                <select name="department_id" id="departmentSelect" required onchange="updateSemesters(true); updateClasses(true);">
                     <option value="">Select Department</option>
                     @foreach ($departments as $dept)
                         <option value="{{ $dept->id }}"
@@ -239,7 +239,7 @@
             </div>
             <div class="filter-group">
                 <label>Semester</label>
-                <select name="semester" id="semesterSelect" required onchange="updateDivisions(); submitFilteredAllocationWhenReady()">
+                <select name="semester" id="semesterSelect" required onchange="updateClasses(true);">
                     <option value="">Select Semester</option>
                     @foreach ($semesters as $sem)
                         <option value="{{ $sem }}"
@@ -250,20 +250,20 @@
                 </select>
             </div>
             <div class="filter-group">
-                <label>Division</label>
-                <select name="division" id="divisionSelect" onchange="submitFilteredAllocationWhenReady()">
-                    <option value="">Select Division</option>
-                    @foreach ($divisions as $division)
-                        <option value="{{ $division }}"
-                            {{ old('division', request('division')) == $division ? 'selected' : '' }}>
-                            {{ $division }}
+                <label>Class</label>
+                <select name="class" id="classSelect" disabled>
+                    <option value="">Select Class</option>
+                    @foreach ($classes as $class)
+                        <option value="{{ $class }}"
+                            {{ old('class', request('class') ?: request('class_name') ?: request('division')) == $class ? 'selected' : '' }}>
+                            {{ $class }}
                         </option>
                     @endforeach
                 </select>
             </div>
             <div class="filter-group">
                 <label>Term</label>
-                <select name="term" required onchange="submitFilteredAllocationWhenReady()">
+                <select name="term" required>
                     <option value="">Select Term</option>
                     @foreach ($terms as $term)
                         <option value="{{ $term }}" {{ old('term', request('term')) == $term ? 'selected' : '' }}>{{ $term }}</option>
@@ -272,7 +272,7 @@
             </div>
             <div class="filter-group">
                 <label>Academic Year</label>
-                <select name="academic_year" required onchange="submitFilteredAllocationWhenReady()">
+                <select name="academic_year" required>
                     <option value="">Select Academic Year</option>
                     @foreach ($academicYears as $academicYear)
                         <option value="{{ $academicYear }}" {{ old('academic_year', request('academic_year')) == $academicYear ? 'selected' : '' }}>{{ $academicYear }}</option>
@@ -289,51 +289,242 @@
     </form>
 </div>
 
+@if ($selectedDepartmentId > 0 && $selectedSemester !== '' && $selectedClass !== '')
+    <div class="filter-card">
+        <h2>Configure Division Lab Sharing</h2>
+        <p style="color:#6b7280; margin-top:-8px;">Choose divisions saved for this class in Manage Subjects and assign their shared lab.</p>
+        <form method="POST" action="/admin/classroom-allocation">
+            @csrf
+            <input type="hidden" name="form_type" value="save-lab-group">
+            <input type="hidden" name="department_id" value="{{ $selectedDepartmentId }}">
+            <input type="hidden" name="semester" value="{{ $selectedSemester }}">
+            <input type="hidden" name="class_name" value="{{ $selectedClass }}">
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>Group Name</label>
+                    <input type="text" name="group_name" maxlength="80" required placeholder="Example: Group 1">
+                </div>
+                <div class="filter-group">
+                    <label>Divisions</label>
+                    <select name="divisions[]" multiple required size="4">
+                        @foreach ($selectedDivisions as $divisionName)
+                            <option value="{{ $divisionName }}">{{ $divisionName }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Available Lab</label>
+                    <select name="classroom_id" required>
+                        <option value="">Select Lab</option>
+                        @foreach ($availableLabs as $lab)
+                            <option value="{{ $lab->id }}">{{ $lab->room_number }} (Capacity: {{ $lab->room_capacity }})</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div>
+                    <button type="submit" class="btn-generate">Save Lab Group</button>
+                </div>
+            </div>
+        </form>
+        @if ($labGroups->isNotEmpty())
+            <div style="margin-top:16px;">
+                <strong>Configured groups</strong>
+                @foreach ($labGroups as $group)
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #e5e7eb;">
+                        <span>{{ $group->group_name }}: {{ implode(', ', $group->divisions ?? []) }} → {{ $group->classroom?->room_number ?? 'Lab unavailable' }}</span>
+                        <form method="POST" action="/admin/classroom-allocation/lab-groups/{{ $group->id }}/delete" onsubmit="return confirm('Remove this lab sharing group?');">
+                            @csrf
+                            <button type="submit" class="btn btn-danger">Remove</button>
+                        </form>
+                    </div>
+                @endforeach
+            </div>
+        @endif
+    </div>
+@endif
+
 <script>
+    const classesMap = @json($classesMap ?? []);
+    const semestersMap = @json($semestersMap ?? []);
     const divisionsMap = @json($divisionsMap ?? []);
-    const oldDivision = "{{ request('division') }}";
+    const subjectOptionsMap = @json($subjectOptionsMap ?? []);
+    const departmentSelect = document.getElementById('departmentSelect');
+    const semesterSelect = document.getElementById('semesterSelect');
+    const classSelect = document.getElementById('classSelect');
+    const oldSemester = @json((string) request('semester', ''));
+    const oldClass = @json((string) (request('class') ?: request('class_name') ?: request('division')));
 
-    function updateDivisions() {
-        const semesterSelect = document.getElementById('semesterSelect');
-        const divisionSelect = document.getElementById('divisionSelect');
-        const selectedSemester = semesterSelect.value;
-
-        // Save current selection if we're not just initializing
-        const currentSelection = divisionSelect.value || oldDivision;
-
-        // Clear existing options except the first one
-        divisionSelect.innerHTML = '<option value="">Select Division</option>';
-
-        let optionsList = [];
-        if (selectedSemester && divisionsMap[selectedSemester]) {
-            optionsList = divisionsMap[selectedSemester];
-        } else {
-            // When no semester is selected yet, show all active divisions
-            optionsList = Object.values(divisionsMap).flat().filter((v, i, a) => a.indexOf(v) === i);
+    function updateSemesters(resetSelection) {
+        if (!semesterSelect) {
+            return;
         }
 
-        optionsList.forEach(function(division) {
+        const selectedDepartment = departmentSelect ? departmentSelect.value : '';
+        const selectedSemester = resetSelection ? '' : (semesterSelect.value || oldSemester);
+        const optionsList = selectedDepartment ? (semestersMap[selectedDepartment] || []) : [];
+
+        semesterSelect.innerHTML = '<option value="">Select Semester</option>';
+        semesterSelect.disabled = !selectedDepartment || optionsList.length === 0;
+
+        optionsList.forEach(function (semester) {
             const option = document.createElement('option');
-            option.value = division;
-            option.textContent = division;
-            if (division === currentSelection) {
+            option.value = semester;
+            option.textContent = 'Semester ' + semester;
+            option.selected = semester === selectedSemester;
+            semesterSelect.appendChild(option);
+        });
+
+        if (!optionsList.includes(selectedSemester)) {
+            semesterSelect.value = '';
+        }
+    }
+
+    function updateClasses(resetSelection) {
+        const selectedDepartment = departmentSelect ? departmentSelect.value : '';
+        const selectedSemester = semesterSelect ? semesterSelect.value : '';
+        const currentSelection = resetSelection ? '' : (classSelect ? (classSelect.value || oldClass) : oldClass);
+
+        if (!classSelect) {
+            return;
+        }
+
+        classSelect.innerHTML = '<option value="">Select Class</option>';
+        const optionsList = selectedDepartment && selectedSemester && classesMap[selectedDepartment]
+            ? (classesMap[selectedDepartment][selectedSemester] || [])
+            : [];
+
+        if (!(selectedDepartment && selectedSemester) || optionsList.length === 0) {
+            classSelect.disabled = true;
+            classSelect.required = false;
+            classSelect.innerHTML = '<option value="">Select Class</option>';
+            return;
+        }
+
+        classSelect.disabled = false;
+        classSelect.required = true;
+        optionsList.forEach(function(className) {
+            const option = document.createElement('option');
+            option.value = className;
+            option.textContent = className;
+            if (className === currentSelection) {
                 option.selected = true;
             }
-            divisionSelect.appendChild(option);
+            classSelect.appendChild(option);
+        });
+
+        if (currentSelection && optionsList.includes(currentSelection)) {
+            classSelect.value = currentSelection;
+        }
+    }
+
+    function updateResultFilters() {
+        const department = document.getElementById('resultsDepartment');
+        const semester = document.getElementById('resultsSemester');
+        const selectedClass = document.getElementById('resultsClass');
+        const division = document.getElementById('resultsDivision');
+        const subject = document.getElementById('resultsSubject');
+
+        if (!department || !semester || !selectedClass || !division || !subject) {
+            return;
+        }
+
+        const departmentId = department.value;
+        const semesterValue = semester.value;
+        const classValue = selectedClass.dataset.selected || '';
+        const divisionValue = division.dataset.selected || '';
+        const subjectValue = subject.dataset.selected || '';
+        const semesterValues = departmentId ? (semestersMap[departmentId] || []) : [];
+        semester.innerHTML = '<option value="">All Semesters</option>';
+        semesterValues.forEach(function (value) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = 'Semester ' + value;
+            option.selected = value === semesterValue;
+            semester.appendChild(option);
+        });
+
+        const classValues = departmentId && semesterValue && classesMap[departmentId]
+            ? (classesMap[departmentId][semesterValue] || [])
+            : [];
+        selectedClass.innerHTML = '<option value="">All Classes</option>';
+        classValues.forEach(function (value) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            option.selected = value === classValue;
+            selectedClass.appendChild(option);
+        });
+
+        const divisions = departmentId && semesterValue && classValue && divisionsMap[departmentId]
+            && divisionsMap[departmentId][semesterValue]
+            ? (divisionsMap[departmentId][semesterValue][classValue] || [])
+            : [];
+        division.innerHTML = '<option value="">All Divisions</option>';
+        divisions.forEach(function (value) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            option.selected = value === divisionValue;
+            division.appendChild(option);
+        });
+
+        const subjects = departmentId && semesterValue && subjectOptionsMap[departmentId]
+            ? (subjectOptionsMap[departmentId][semesterValue] || [])
+            : [];
+        subject.innerHTML = '<option value="">All Subjects</option>';
+        subjects.forEach(function (item) {
+            const option = document.createElement('option');
+            option.value = item.id;
+            option.textContent = item.name;
+            option.selected = String(item.id) === subjectValue;
+            subject.appendChild(option);
         });
     }
 
     document.addEventListener('DOMContentLoaded', function() {
-        updateDivisions();
-    });
-    function submitFilteredAllocationWhenReady() {
-        const form = document.getElementById('filteredGenForm');
-        const button = document.getElementById('filteredGenBtn');
-
-        if (form.checkValidity() && !button.disabled) {
-            button.click();
+        updateSemesters();
+        updateClasses();
+        const resultsDepartment = document.getElementById('resultsDepartment');
+        const resultsSemester = document.getElementById('resultsSemester');
+        const resultsClass = document.getElementById('resultsClass');
+        if (resultsDepartment) {
+            resultsDepartment.addEventListener('change', function () {
+                resultsSemester.value = '';
+                resultsClass.dataset.selected = '';
+                document.getElementById('resultsDivision').dataset.selected = '';
+                document.getElementById('resultsSubject').dataset.selected = '';
+                updateResultFilters();
+            });
         }
-    }
+        if (resultsSemester) {
+            resultsSemester.addEventListener('change', function () {
+                resultsClass.dataset.selected = '';
+                document.getElementById('resultsDivision').dataset.selected = '';
+                document.getElementById('resultsSubject').dataset.selected = '';
+                updateResultFilters();
+            });
+        }
+        if (resultsClass) {
+            resultsClass.addEventListener('change', function () {
+                resultsClass.dataset.selected = this.value;
+                document.getElementById('resultsDivision').dataset.selected = '';
+                updateResultFilters();
+            });
+        }
+        const resultsDivision = document.getElementById('resultsDivision');
+        const resultsSubject = document.getElementById('resultsSubject');
+        if (resultsDivision) {
+            resultsDivision.addEventListener('change', function () {
+                resultsDivision.dataset.selected = this.value;
+            });
+        }
+        if (resultsSubject) {
+            resultsSubject.addEventListener('change', function () {
+                resultsSubject.dataset.selected = this.value;
+            });
+        }
+        updateResultFilters();
+    });
 </script>
 
 <div class="summary-grid">
@@ -385,14 +576,65 @@
     </div>
 
     <div class="table-wrap">
-        <table style="min-width: 900px;">
+        <form method="GET" action="/admin/classroom-allocation" class="filter-row" style="padding: 0 0 16px;">
+            <div class="filter-group">
+                <label for="resultsDepartment">Department</label>
+                <select id="resultsDepartment" name="department_id">
+                    <option value="">All Departments</option>
+                    @foreach ($departments as $department)
+                        <option value="{{ $department->id }}" {{ (string) request('department_id') === (string) $department->id ? 'selected' : '' }}>{{ $department->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="resultsSemester">Semester</label>
+                <select id="resultsSemester" name="semester">
+                    <option value="">All Semesters</option>
+                    @foreach ($semesters as $semester)
+                        <option value="{{ $semester }}" {{ (string) request('semester') === (string) $semester ? 'selected' : '' }}>Semester {{ $semester }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="resultsClass">Class</label>
+                <select id="resultsClass" name="class" data-selected="{{ request('class', request('class_name', '')) }}">
+                    <option value="">All Classes</option>
+                    @foreach ($classes as $class)
+                        <option value="{{ $class }}" {{ request('class', request('class_name')) === $class ? 'selected' : '' }}>{{ $class }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="resultsDivision">Division</label>
+                <select id="resultsDivision" name="division_filter" data-selected="{{ request('division_filter', '') }}">
+                    <option value="">All Divisions</option>
+                    @foreach ($selectedDivisions as $divisionName)
+                        <option value="{{ $divisionName }}" {{ request('division_filter') === $divisionName ? 'selected' : '' }}>{{ $divisionName }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="resultsSubject">Subject</label>
+                <select id="resultsSubject" name="subject_id" data-selected="{{ request('subject_id', '') }}">
+                    <option value="">All Subjects</option>
+                    @foreach ($subjectOptions as $subjectOption)
+                        <option value="{{ $subjectOption->id }}" {{ (string) request('subject_id') === (string) $subjectOption->id ? 'selected' : '' }}>{{ $subjectOption->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div>
+                <button type="submit" class="btn-generate">Filter Results</button>
+                <a class="btn btn-muted" href="/admin/classroom-allocation">Clear</a>
+            </div>
+        </form>
+        <table style="min-width: 1050px;">
             <thead>
                 <tr>
                     <th>Sr. No.</th>
-                    <th>Class / Division</th>
+                    <th>Class</th>
+                    <th>Division</th>
                     <th>Subject</th>
                     <th>Subject Type</th>
-                    <th>Faculty</th>
                     <th>Allocation Type</th>
                     <th>Allocated Classroom / Lab</th>
                     <th>Status</th>
@@ -405,9 +647,14 @@
                 @forelse ($allocations as $allocation)
                     @php
                         $subject = $allocation->subject;
-                        $facultyName = $allocation->faculty?->name ?? ($subject?->faculty?->name ?? '—');
                         $isLabAlloc = $allocation->allocation_type === 'Lab'
                             || (! $allocation->allocation_type && str_contains(strtolower((string) $subject?->subject_type), 'lab'));
+                        $isTutorial = str_starts_with((string) $allocation->division, (string) $allocation->class_name.'T')
+                            || strtolower((string) $subject?->subject_type) === 'tutorial'
+                            || (((int) ($subject?->tutorial_credit ?? 0)) > 0 && ((int) ($subject?->lecture_credit ?? 0)) === 0);
+                        $subjectType = $isLabAlloc
+                            ? 'Lab'
+                            : ($isTutorial ? 'Tutorial' : 'Lecture');
                     @endphp
 
                     @if ($isLabAlloc)
@@ -429,9 +676,9 @@
                         <tr>
                             <td>{{ $rowNumber++ }}</td>
                             <td>{{ $allocation->class_name }}</td>
+                            <td>{{ $allocation->division && $allocation->division !== $allocation->class_name ? $allocation->division : '—' }}</td>
                             <td>{{ $subject?->name ?? '—' }}</td>
-                            <td><span class="badge badge-lab">Lab</span></td>
-                            <td>{{ $facultyName }}</td>
+                            <td><span class="badge badge-lab">{{ $subjectType }}</span></td>
                             <td><span class="badge badge-lab">Lab</span></td>
                             <td>{{ $labRooms }}</td>
                             <td>
@@ -441,35 +688,20 @@
                             </td>
                         </tr>
                     @else
-                        @php
-                            $subTypes = collect();
-                            $hasLecture  = ((int) ($subject?->lecture_credit  ?? 0)) > 0;
-                            $hasTutorial = ((int) ($subject?->tutorial_credit ?? 0)) > 0;
-
-                            if ($hasLecture)  { $subTypes->push('Lecture'); }
-                            if ($hasTutorial) { $subTypes->push('Tutorial'); }
-                            if ($subTypes->isEmpty()) {
-                                $rawType = strtolower((string) ($subject?->subject_type ?? 'lecture'));
-                                $subTypes->push(str_contains($rawType, 'tutorial') ? 'Tutorial' : 'Lecture');
-                            }
-                        @endphp
-
-                        @foreach ($subTypes as $sType)
-                            <tr>
-                                <td>{{ $rowNumber++ }}</td>
-                                <td>{{ $allocation->class_name }}</td>
-                                <td>{{ $subject?->name ?? '—' }}</td>
-                                <td><span class="badge badge-classroom">{{ $sType }}</span></td>
-                                <td>{{ $facultyName }}</td>
-                                <td><span class="badge badge-classroom">Classroom</span></td>
-                                <td>{{ $allocation->classroom?->room_number ?? ($allocation->notes ?: '—') }}</td>
-                                <td>
-                                    <span class="badge {{ $allocation->status === 'Allocated' ? 'badge-allocated' : 'badge-unallocated' }}">
-                                        {{ $allocation->status }}
-                                    </span>
-                                </td>
-                            </tr>
-                        @endforeach
+                        <tr>
+                            <td>{{ $rowNumber++ }}</td>
+                            <td>{{ $allocation->class_name }}</td>
+                            <td>{{ $allocation->division && $allocation->division !== $allocation->class_name ? $allocation->division : '—' }}</td>
+                            <td>{{ $subject?->name ?? '—' }}</td>
+                            <td><span class="badge badge-classroom">{{ $subjectType }}</span></td>
+                            <td><span class="badge badge-classroom">Classroom</span></td>
+                            <td>{{ $allocation->classroom?->room_number ?? ($allocation->notes ?: '—') }}</td>
+                            <td>
+                                <span class="badge {{ $allocation->status === 'Allocated' ? 'badge-allocated' : 'badge-unallocated' }}">
+                                    {{ $allocation->status }}
+                                </span>
+                            </td>
+                        </tr>
                     @endif
                 @empty
                     <tr><td colspan="8" style="text-align: center; padding: 24px;">No allocation records found. Click Auto Generate to start.</td></tr>
