@@ -270,13 +270,24 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
 
     $timetable = null;
     $deptName = null;
+    $deptFullName = 'Department of Computer Engineering';
+    $classNameFormatted = '';
+    $classSubjects = collect();
+
+    $term = request('term', 'Odd');
+    $termCode = request('term_code', ($term === 'Even' ? '262' : '261'));
+    $termDates = request('term_dates', '23/06/2026 to 07/11/2026');
+    $wefDate = request('wef_date', '23/06/2026');
+    $sbtDates = request('sbt_dates', '21/09/2026 to 26/09/2026');
 
     if (request()->isMethod('post') || (request()->has('department_id') && request()->has('semester') && request()->has('division'))) {
         $deptId = request('department_id');
         $semester = request('semester');
         $division = request('division');
         $academicYear = request('academic_year');
-        $term = request('term');
+        $term = request('term', 'Odd');
+
+        $classNameFormatted = ($semester && $division) ? ($semester.$division) : '';
 
         $entries = TimetableEntry::with(['subject', 'faculty', 'classroom'])
             ->where('department_id', $deptId)
@@ -285,18 +296,57 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
             ->get();
 
         $dept = Department::find($deptId);
-        $deptName = $dept ? $dept->name : '';
-        $className = $deptName.'-'.$semester.'-'.$division;
-        $managedAllocations = RoomAllocation::with(['classroom', 'secondClassroom'])
+        $rawDeptName = $dept ? $dept->name : '';
+        $deptName = $rawDeptName;
+        $deptDisplayName = (stripos($rawDeptName, 'comp') !== false)
+            ? 'Computer Engineering'
+            : $rawDeptName;
+        $deptFullName = 'Department of '.$deptDisplayName;
+
+        $className = $rawDeptName.'-'.$semester.'-'.$division;
+        $managedAllocations = RoomAllocation::with(['classroom', 'secondClassroom', 'faculty', 'subject'])
             ->where('department_id', $deptId)
             ->where('semester', $semester)
-            ->whereIn('class_name', array_values(array_unique([$division, $className])))
+            ->where(function ($q) use ($division, $className) {
+                $q->whereIn('class_name', array_values(array_unique([$division, $className])))
+                    ->orWhere('division', $division)
+                    ->orWhere('division', 'like', $division.'%');
+            })
             ->get();
 
-        // format to match index.blade.php expectations
+        // Load subjects for this class to build the reference table below timetable
+        $classSubjects = Subject::with('faculty')
+            ->where('department_id', $deptId)
+            ->where('semester', $semester)
+            ->get()
+            ->filter(function ($subject) use ($division) {
+                $classes = $subject->effective_class_selections ?? [];
+
+                return empty($classes) || in_array($division, $classes, true);
+            })
+            ->values();
+
+        $getFacultyInitials = function (?string $name): string {
+            if (empty($name)) {
+                return '';
+            }
+            $clean = trim(preg_replace('/^(Prof\.|Prof|Dr\.|Dr|Mr\.|Mr|Mrs\.|Mrs|Ms\.|Ms|Er\.|Er)\s+/i', '', $name));
+            $parts = preg_split('/[\s\.\-]+/', $clean, -1, PREG_SPLIT_NO_EMPTY);
+            if (empty($parts)) {
+                return strtoupper(substr($name, 0, 3));
+            }
+            $initials = '';
+            foreach ($parts as $p) {
+                $initials .= strtoupper(substr($p, 0, 1));
+            }
+
+            return $initials;
+        };
+
+        // format to match timetable view expectations
         $sessions = [];
         foreach ($entries as $entry) {
-            $isPractical = $entry->lecture_type === 'Practical';
+            $isPractical = strcasecmp((string)$entry->lecture_type, 'Practical') === 0;
             $allocationType = $isPractical ? 'Lab' : 'Classroom';
             $activityType = $isPractical ? 'Practical' : $entry->lecture_type;
             $roomMatchesType = fn (?Classroom $room): bool => $room !== null
@@ -352,9 +402,12 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
                 && $entry->classroom?->availability === 'Available'
                 ? $entry->classroom
                 : null;
+            $resolvedClassroom = $room ?? ($hasMatchingRoomAllocation ? null : $fallbackRoom);
             $roomLabel = $isPractical ? 'Lab' : 'Classroom';
-            $roomName = $room
-                ? $roomLabel.': '.$room->room_number.($room->location ? ' - '.$room->location : '')
+            $roomNumber = $resolvedClassroom?->room_number ?? '';
+            $roomLocation = $resolvedClassroom?->location ?? '';
+            $roomName = $resolvedClassroom
+                ? $roomLabel.': '.$resolvedClassroom->room_number.($resolvedClassroom->location ? ' - '.$resolvedClassroom->location : '')
                 : ($hasMatchingRoomAllocation
                     ? $roomLabel.' unavailable'
                     : ($fallbackRoom
@@ -363,20 +416,113 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
             if (! $selectedRoomAllocation && ! $hasMatchingRoomAllocation
                 && $entry->notes && str_starts_with($entry->notes, 'Room2:')) {
                 $roomName .= ' + '.substr($entry->notes, 6);
+                $roomNumber .= ' + '.substr($entry->notes, 6);
             } elseif ($selectedRoomAllocation?->secondClassroom) {
                 $secondRoom = $selectedRoomAllocation->secondClassroom;
                 $roomName .= ' + '.$secondRoom->room_number.($secondRoom->location ? ' - '.$secondRoom->location : '');
+                $roomNumber .= ' + '.$secondRoom->room_number;
+            }
+
+            $facultyName = $entry->faculty ? $entry->faculty->name : '';
+            $facultyInitials = $getFacultyInitials($facultyName);
+
+            // Pre-resolve all allocated batches if this is a Practical / Lab session
+            $labBatches = [];
+            if ($isPractical) {
+                $rawSubName = $entry->subject ? $entry->subject->name : '';
+                $rawSubCode = $entry->subject ? $entry->subject->subject_code : '';
+                $subShort = (strlen($rawSubName) > 0 && strlen($rawSubName) <= 8)
+                    ? $rawSubName
+                    : ($rawSubCode ?: $rawSubName);
+                $subShort = preg_replace('/\s*\(.*?\)\s*/', '', (string) $subShort);
+                $cleanSubCode = strtoupper(trim($subShort));
+
+                $batches = $entry->subject?->division_selections ?? [];
+                if (empty($batches)) {
+                    $batches = $managedAllocations
+                        ->filter(fn ($a) => $a->subject_id === $entry->subject_id && ($a->activity_type === 'Practical' || $a->allocation_type === 'Lab'))
+                        ->map(fn ($a) => $a->activity_batch ?: $a->division)
+                        ->filter(fn ($b) => ! empty($b) && str_starts_with($b, $division))
+                        ->unique()
+                        ->values()
+                        ->all();
+                }
+                if (empty($batches)) {
+                    $batches = [$division.'1', $division.'2', $division.'3', $division.'4'];
+                }
+                sort($batches);
+
+                foreach ($batches as $batch) {
+                    // 1. Faculty for this batch
+                    $facAlloc = $managedAllocations
+                        ->filter(fn ($a) => $a->subject_id === $entry->subject_id
+                            && $a->activity_type === 'Practical'
+                            && ($a->activity_batch === $batch || $a->division === $batch)
+                            && ! empty($a->faculty))
+                        ->sortByDesc('id')
+                        ->first();
+                    $bFacName = $facAlloc?->faculty?->name;
+                    if (empty($bFacName)) {
+                        $matchEntry = $entries->first(fn ($e) => $e->subject_id === $entry->subject_id
+                            && $e->activity_batch === $batch
+                            && ! empty($e->faculty));
+                        $bFacName = $matchEntry?->faculty?->name ?? $entry->faculty?->name ?? '';
+                    }
+                    $bFacInitials = $getFacultyInitials($bFacName) ?: ($facultyInitials ?: 'DF');
+
+                    // 2. Lab Room for this batch
+                    $roomAlloc = $managedAllocations
+                        ->filter(fn ($a) => $a->subject_id === $entry->subject_id
+                            && ($a->allocation_type === 'Lab' || ($a->classroom && str_contains(strtolower($a->classroom->room_type), 'lab')))
+                            && ($a->division === $batch || $a->activity_batch === $batch)
+                            && ! empty($a->classroom))
+                        ->sortByDesc('id')
+                        ->first();
+                    $bRoom = $roomAlloc?->classroom?->room_number;
+                    if (empty($bRoom)) {
+                        $anyLab = $managedAllocations
+                            ->filter(fn ($a) => ($a->division === $batch || $a->activity_batch === $batch)
+                                && ! empty($a->classroom)
+                                && str_contains(strtolower($a->classroom->room_type), 'lab'))
+                            ->sortByDesc('id')
+                            ->first();
+                        $bRoom = $anyLab?->classroom?->room_number;
+                    }
+                    if (empty($bRoom)) {
+                        $matchEntry = $entries->first(fn ($e) => $e->subject_id === $entry->subject_id
+                            && $e->activity_batch === $batch
+                            && ! empty($e->classroom));
+                        $bRoom = $matchEntry?->classroom?->room_number ?? $resolvedClassroom?->room_number ?? $entry->classroom?->room_number ?? '';
+                    }
+                    $cleanRoom = strtoupper(trim(preg_replace('/^Lab:\s*/i', '', (string) $bRoom)));
+                    if (empty($cleanRoom)) {
+                        $cleanRoom = 'LAB';
+                    }
+
+                    $labBatches[] = [
+                        'batch' => $batch,
+                        'subject_code' => $cleanSubCode,
+                        'faculty_initials' => $bFacInitials,
+                        'room' => $cleanRoom,
+                        'line' => "{$batch}-{$cleanSubCode}-{$bFacInitials}-{$cleanRoom}",
+                    ];
+                }
             }
 
             $sessions[] = [
                 'day' => $entry->day,
                 'time_slot' => $entry->time_slot,
                 'subject' => $entry->subject ? $entry->subject->name : '',
-                'faculty' => $entry->faculty ? $entry->faculty->name : '',
+                'subject_code' => $entry->subject ? ($entry->subject->subject_code ?: '') : '',
+                'faculty' => $facultyName,
+                'faculty_initials' => $facultyInitials,
                 'room' => $roomName,
+                'room_number' => $roomNumber ?: $roomName,
+                'room_location' => $roomLocation,
                 'type' => $entry->lecture_type,
                 'batch' => $entry->activity_batch,
-                'duration' => $entry->duration,
+                'duration' => $isPractical ? 2 : (int) ($entry->duration ?: 1),
+                'lab_batches' => $labBatches,
             ];
         }
 
@@ -387,6 +533,13 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
             'academic_year' => $academicYear,
             'term' => $term,
             'division' => $division,
+            'semester' => $semester,
+            'class_name' => $classNameFormatted,
+            'term_code' => $termCode,
+            'term_dates' => $termDates,
+            'wef_date' => $wefDate,
+            'sbt_dates' => $sbtDates,
+            'dept_full_name' => $deptFullName,
         ];
     }
 
@@ -402,13 +555,20 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
         'departments' => $departments,
         'timetable' => $timetable,
         'deptName' => $deptName,
+        'deptFullName' => $deptFullName,
+        'classNameFormatted' => $classNameFormatted,
+        'classSubjects' => $classSubjects,
         'semesters' => $semesters,
         'divisions' => $divisions,
         'divisionsMap' => $divisionsMap,
         'semester' => request('semester'),
         'division' => request('division', 'A'),
         'academicYear' => request('academic_year', date('Y').'-'.(date('Y') + 1)),
-        'term' => request('term', 'Odd'),
+        'term' => $term,
+        'termCode' => $termCode,
+        'termDates' => $termDates,
+        'wefDate' => $wefDate,
+        'sbtDates' => $sbtDates,
     ]);
 });
 
@@ -2568,7 +2728,99 @@ Route::middleware(['web'])->group(function () {
             return redirect('/')->with('error', 'Please login to continue.');
         }
 
-        return view('student.timetable');
+        $studentAuth = session('student.auth');
+        $studentDept = $studentAuth['department'] ?? '';
+        $semester = $studentAuth['semester'] ?? '5';
+        $division = $studentAuth['divcon'] ?: ($studentAuth['student_class'] ? substr($studentAuth['student_class'], -1) : 'A');
+
+        $dept = Department::where('name', $studentDept)->orWhere('code', $studentDept)->first()
+            ?? Department::first();
+        $deptId = $dept?->id;
+
+        $rawDeptName = $dept ? $dept->name : ($studentDept ?: 'Computer Engineering');
+        $deptDisplayName = (stripos($rawDeptName, 'comp') !== false)
+            ? 'Computer Engineering'
+            : $rawDeptName;
+        $deptFullName = 'Department of '.$deptDisplayName;
+
+        $entries = collect();
+        if ($deptId) {
+            $entries = TimetableEntry::with(['subject', 'faculty', 'classroom'])
+                ->where('department_id', $deptId)
+                ->where('semester', $semester)
+                ->where('division', $division)
+                ->get();
+        }
+
+        $classSubjects = collect();
+        if ($deptId) {
+            $classSubjects = Subject::with('faculty')
+                ->where('department_id', $deptId)
+                ->where('semester', $semester)
+                ->get()
+                ->filter(function ($subject) use ($division) {
+                    $classes = $subject->effective_class_selections ?? [];
+
+                    return empty($classes) || in_array($division, $classes, true);
+                })
+                ->values();
+        }
+
+        $getFacultyInitials = function (?string $name): string {
+            if (empty($name)) {
+                return '';
+            }
+            $clean = trim(preg_replace('/^(Prof\.|Prof|Dr\.|Dr|Mr\.|Mr|Mrs\.|Mrs|Ms\.|Ms|Er\.|Er)\s+/i', '', $name));
+            $parts = preg_split('/[\s\.\-]+/', $clean, -1, PREG_SPLIT_NO_EMPTY);
+            if (empty($parts)) {
+                return strtoupper(substr($name, 0, 3));
+            }
+            $initials = '';
+            foreach ($parts as $p) {
+                $initials .= strtoupper(substr($p, 0, 1));
+            }
+
+            return $initials;
+        };
+
+        $sessions = [];
+        foreach ($entries as $entry) {
+            $roomName = $entry->classroom
+                ? ($entry->classroom->room_type.': '.$entry->classroom->room_number.($entry->classroom->location ? ' - '.$entry->classroom->location : ''))
+                : 'Room unavailable';
+
+            $sessions[] = [
+                'day' => $entry->day,
+                'time_slot' => $entry->time_slot,
+                'subject' => $entry->subject ? $entry->subject->name : '',
+                'subject_code' => $entry->subject ? ($entry->subject->subject_code ?: '') : '',
+                'faculty' => $entry->faculty ? $entry->faculty->name : '',
+                'faculty_initials' => $getFacultyInitials($entry->faculty?->name),
+                'room' => $roomName,
+                'room_number' => $entry->classroom?->room_number ?? '',
+                'type' => $entry->lecture_type,
+                'batch' => $entry->activity_batch,
+                'duration' => (int) ($entry->duration ?: 1),
+            ];
+        }
+
+        $timetable = [
+            'days' => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+            'time_slots' => ['10:30-11:30', '11:30-12:30', '01:00-02:00', '02:00-03:00', '03:10-04:10', '04:10-05:10'],
+            'sessions' => $sessions,
+            'academic_year' => '2026-2027',
+            'term' => 'Odd',
+            'term_code' => '261',
+            'term_dates' => '23/06/2026 to 07/11/2026',
+            'wef_date' => '23/06/2026',
+            'sbt_dates' => '21/09/2026 to 26/09/2026',
+            'division' => $division,
+            'semester' => $semester,
+            'class_name' => $semester.$division,
+            'dept_full_name' => $deptFullName,
+        ];
+
+        return view('student.timetable', compact('timetable', 'classSubjects', 'deptDisplayName', 'deptFullName', 'semester', 'division'));
     });
 
     Route::get('/student/notifications', function () {
@@ -2638,7 +2890,42 @@ Route::middleware(['web'])->group(function () {
             return redirect('/')->with('error', 'Please login to continue.');
         }
 
-        return view('faculty.timetable');
+        $facultyId = session('faculty.auth.id');
+        $facultyName = session('faculty.auth.name');
+
+        $entries = TimetableEntry::with(['subject', 'classroom', 'department'])
+            ->where('faculty_id', $facultyId)
+            ->get();
+
+        $sessions = [];
+        foreach ($entries as $entry) {
+            $sessions[] = [
+                'day' => $entry->day,
+                'time_slot' => $entry->time_slot,
+                'subject' => $entry->subject ? $entry->subject->name : '',
+                'subject_code' => $entry->subject ? ($entry->subject->subject_code ?: '') : '',
+                'faculty' => $facultyName,
+                'room' => $entry->classroom ? ($entry->classroom->room_type.': '.$entry->classroom->room_number) : '',
+                'type' => $entry->lecture_type,
+                'batch' => $entry->activity_batch,
+                'duration' => (int) ($entry->duration ?: 1),
+                'semester' => $entry->semester,
+                'division' => $entry->division,
+            ];
+        }
+
+        $timetable = [
+            'days' => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+            'time_slots' => ['10:30-11:30', '11:30-12:30', '01:00-02:00', '02:00-03:00', '03:10-04:10', '04:10-05:10'],
+            'sessions' => $sessions,
+            'academic_year' => '2026-2027',
+            'term' => 'Odd',
+            'term_code' => '261',
+            'faculty_name' => $facultyName,
+            'dept_full_name' => 'Department of Computer Engineering',
+        ];
+
+        return view('faculty.timetable', compact('timetable', 'facultyName'));
     });
 
     Route::get('/faculty/notifications', function () {
