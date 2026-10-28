@@ -160,6 +160,7 @@ class ClassroomAllocationService
     {
         $classrooms = Classroom::query()
             ->where('availability', 'Available')
+            ->where('room_type', 'not like', '%lab%')
             ->whereNotNull('room_number')
             ->orderBy('room_capacity')
             ->get();
@@ -380,11 +381,22 @@ class ClassroomAllocationService
 
                             foreach ($divisionNames->all() as $divisionName) {
                                 if (! in_array($divisionName, $assignedDivisions, true)) {
+                                    $pairedDivision = $this->pairedPracticalDivision($divisionName);
+                                    $members = [$divisionName];
+
+                                    if ($pairedDivision !== null
+                                        && in_array($pairedDivision, $divisionNames->all(), true)
+                                        && ! in_array($pairedDivision, $assignedDivisions, true)) {
+                                        $members[] = $pairedDivision;
+                                        $assignedDivisions[] = $pairedDivision;
+                                    }
+
                                     $labGroupPartitions[] = [
-                                        'divisions' => [$divisionName],
+                                        'divisions' => $members,
                                         'classroom_id' => null,
                                         'is_configured' => false,
                                     ];
+                                    $assignedDivisions[] = $divisionName;
                                 }
                             }
 
@@ -402,10 +414,10 @@ class ClassroomAllocationService
                                     : null;
                                 $lab = $partition['is_configured']
                                     ? $configuredLab
-                                    : $this->pickLab(
+                                    : ($this->pickLab(
                                         $labs->reject(fn (Classroom $candidate): bool => in_array($candidate->id, $usedLabIds, true))->values(),
                                         $groupStrength
-                                    );
+                                    ) ?? $this->pickLab($labs, $groupStrength));
                                 $isSuitable = $lab && (int) $lab->room_capacity >= $groupStrength;
                                 $status = $isSuitable ? 'Allocated' : 'Unallocated';
                                 $message = $partition['is_configured'] && ! $configuredLab
@@ -520,6 +532,19 @@ class ClassroomAllocationService
             ->first();
     }
 
+    private function pairedPracticalDivision(string $division): ?string
+    {
+        if (preg_match('/^(.*?)([1-4])$/', $division, $matches) !== 1) {
+            return null;
+        }
+
+        $pairStart = (int) $matches[2] <= 2 ? 1 : 3;
+        $pairEnd = $pairStart + 1;
+        $pairedNumber = (int) $matches[2] === $pairStart ? $pairEnd : $pairStart;
+
+        return $matches[1].$pairedNumber;
+    }
+
     private function findFacultyId(Subject $subject, array $batch): ?int
     {
         if ($subject->faculty_id) {
@@ -534,8 +559,7 @@ class ClassroomAllocationService
         string $semester,
         ?string $division,
         ?string $class = null
-    ): int
-    {
+    ): int {
         $departmentCode = Department::query()
             ->where('name', $department)
             ->value('code');

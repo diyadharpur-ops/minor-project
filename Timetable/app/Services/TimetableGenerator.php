@@ -134,11 +134,13 @@ class TimetableGenerator
         }
 
         $scheduledAllocations = RoomAllocation::query()
-            ->whereNotNull('faculty_id')
             ->whereNotNull('day')
             ->whereNotNull('start_time')
             ->whereNotNull('end_time')
-            ->where('class_name', '!=', $className)
+            ->where(function ($query) use ($className): void {
+                $query->where('class_name', '!=', $className)
+                    ->orWhereNull('class_name');
+            })
             ->get();
 
         foreach ($scheduledAllocations as $allocation) {
@@ -158,7 +160,10 @@ class TimetableGenerator
                     continue;
                 }
 
-                $facultyOccupiedGlobal[$allocation->faculty_id][$allocation->day][$timeSlot] = true;
+                if ($allocation->faculty_id) {
+                    $facultyOccupiedGlobal[$allocation->faculty_id][$allocation->day][$timeSlot] = true;
+                }
+
                 foreach ([$allocation->classroom_id, $allocation->second_classroom_id] as $roomId) {
                     if ($roomId) {
                         $roomOccupiedGlobal[$roomId][$allocation->day][$timeSlot] = true;
@@ -203,6 +208,65 @@ class TimetableGenerator
             return $subjectAllocations->first()
                 ?? $roomAllocations->first(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $subject->id
                     && $allocation->activity_type === null);
+        };
+        $findRoomAllocation = function (Subject $subject, string $type, ?string $batch) use (
+            $findActivityAllocation,
+            $findLegacyAllocation,
+            $roomAllocations
+
+        ): ?RoomAllocation {
+            $allocationType = $type === 'Practical' ? 'Lab' : 'Classroom';
+            $batchCandidates = [$batch];
+
+            if ($type === 'Practical' && $batch !== null) {
+                $pair = $this->pairedPracticalBatches($batch);
+                if ($pair !== null) {
+                    $batchCandidates = $pair;
+                }
+            }
+
+            $fallbackAllocation = null;
+            foreach (array_unique($batchCandidates) as $candidateBatch) {
+                if ($candidateBatch === null) {
+                    continue;
+                }
+
+                $activityAllocation = $findActivityAllocation($subject, $type, $candidateBatch);
+                $legacyAllocation = $roomAllocations->first(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $subject->id
+                    && $allocation->activity_type === null
+                    && ($allocation->allocation_type === $allocationType || $allocation->allocation_type === null)
+                    && $allocation->division === $candidateBatch);
+                $candidateAllocation = $activityAllocation?->classroom_id
+                    ? $activityAllocation
+                    : $legacyAllocation;
+
+                if (! $candidateAllocation) {
+                    continue;
+                }
+
+                $fallbackAllocation ??= $candidateAllocation;
+                $room = $candidateAllocation->classroom;
+                $isSuitableType = $room && ($type === 'Practical'
+                    ? str_contains(strtolower((string) $room->room_type), 'lab')
+                    : ! str_contains(strtolower((string) $room->room_type), 'lab'));
+                $hasCapacity = $room
+                    && (int) $room->room_capacity >= (int) ($candidateAllocation->student_count ?? 0);
+
+                if ($room?->availability === 'Available' && $isSuitableType && $hasCapacity) {
+                    return $candidateAllocation;
+                }
+            }
+
+            if ($fallbackAllocation) {
+                return $fallbackAllocation;
+            }
+
+            $activityAllocation = $findActivityAllocation($subject, $type, $batch);
+            if ($activityAllocation?->classroom_id) {
+                return $activityAllocation;
+            }
+
+            return $findLegacyAllocation($subject, $type, $batch);
         };
         $getTheoryFaculty = function (Subject $subject) use ($findActivityAllocation, $findLegacyAllocation, $allFaculty): ?Faculty {
             $allocation = $findActivityAllocation($subject, 'Lecture', null)
@@ -265,8 +329,7 @@ class TimetableGenerator
                             'duration' => 2,
                             'subject' => $subject,
                             'faculty' => $getActivityFaculty($subject, 'Practical', null, $theoryFaculty),
-                            'allocation' => $findActivityAllocation($subject, 'Practical', null)
-                                ?? $findLegacyAllocation($subject, 'Practical'),
+                            'allocation' => $findRoomAllocation($subject, 'Practical', null),
                         ]);
                         $totalHours += 2;
                     }
@@ -295,8 +358,7 @@ class TimetableGenerator
                     'duration' => 1,
                     'subject' => $subject,
                     'faculty' => $theoryFaculty,
-                    'allocation' => $findActivityAllocation($subject, 'Lecture', null)
-                        ?? $findLegacyAllocation($subject, 'Lecture'),
+                    'allocation' => $findRoomAllocation($subject, 'Lecture', null),
                 ]);
                 $totalHours += 1;
             }
@@ -309,8 +371,7 @@ class TimetableGenerator
                         'duration' => 2,
                         'subject' => $subject,
                         'faculty' => $getActivityFaculty($subject, 'Practical', $labBatch, $theoryFaculty),
-                        'allocation' => $findActivityAllocation($subject, 'Practical', $labBatch)
-                            ?? $findLegacyAllocation($subject, 'Practical', $labBatch),
+                        'allocation' => $findRoomAllocation($subject, 'Practical', $labBatch),
                     ]);
                     $totalHours += 2;
                 }
@@ -324,8 +385,7 @@ class TimetableGenerator
                         'duration' => 1,
                         'subject' => $subject,
                         'faculty' => $getActivityFaculty($subject, 'Tutorial', $tutorialBatch, $theoryFaculty),
-                        'allocation' => $findActivityAllocation($subject, 'Tutorial', $tutorialBatch)
-                            ?? $findLegacyAllocation($subject, 'Tutorial', $tutorialBatch),
+                        'allocation' => $findRoomAllocation($subject, 'Tutorial', $tutorialBatch),
                     ]);
                     $totalHours++;
                 }
@@ -357,6 +417,7 @@ class TimetableGenerator
             $subjectOnDay = [];
             $facultyOccupiedLocal = $facultyOccupiedGlobal;
             $roomOccupiedLocal = $roomOccupiedGlobal;
+            $pairedPracticalRooms = [];
 
             $localAssignments = [];
             $placedAll = true;
@@ -368,6 +429,15 @@ class TimetableGenerator
 
             foreach ($orderedBlocks as $block) {
                 $validPlacements = [];
+                $practicalPair = $block->type === 'Practical' && $block->batch !== null
+                    ? $this->pairedPracticalBatches($block->batch)
+                    : null;
+                $practicalPairKey = $practicalPair
+                    ? $block->subject->id.'|'.implode('|', $practicalPair)
+                    : null;
+                $pairedRoomId = $practicalPairKey
+                    ? ($pairedPracticalRooms[$practicalPairKey] ?? null)
+                    : null;
 
                 foreach ($this->days as $day) {
                     $ns = $nextSlot[$day];
@@ -470,7 +540,27 @@ class TimetableGenerator
                         }
                     }
 
-                    if (! $availableRoomId && ! $hasExplicitAllocation) {
+                    if ($pairedRoomId !== null) {
+                        $pairedRoom = $classrooms->firstWhere('id', $pairedRoomId);
+                        $pairedRoomIsAvailable = $pairedRoom
+                            && str_contains(strtolower((string) $pairedRoom->room_type), 'lab')
+                            && (int) $pairedRoom->room_capacity >= (int) ($alloc?->student_count ?? 0);
+                        $pairedRoomConflict = false;
+                        foreach ($slots as $s) {
+                            if (! empty($roomOccupiedLocal[$pairedRoomId][$day][$s])) {
+                                $pairedRoomConflict = true;
+                                break;
+                            }
+                        }
+
+                        $availableRoomId = $pairedRoomIsAvailable && ! $pairedRoomConflict
+                            ? $pairedRoomId
+                            : null;
+                        $availableSecondRoomId = null;
+                        $secondRoomNotes = null;
+                    }
+
+                    if (! $availableRoomId && ! $hasExplicitAllocation && $pairedRoomId === null) {
                         $roomsList = ($block->type == 'Practical') ? $labRooms : $lectureRooms;
                         foreach ($roomsList->shuffle() as $room) {
                             $roomConflict = false;
@@ -485,9 +575,12 @@ class TimetableGenerator
                                 break;
                             }
                         }
-                        if (! $availableRoomId && $roomsList->isNotEmpty()) {
+                        if (! $availableRoomId) {
                             continue;
                         }
+                    }
+                    if ($pairedRoomId !== null && ! $availableRoomId) {
+                        continue;
                     }
                     if ($hasExplicitAllocation && ! $availableRoomId) {
                         continue;
@@ -539,6 +632,10 @@ class TimetableGenerator
                 $secondRoomId = $best['second_room_id'];
                 $notes = $best['notes'];
                 $facultyId = $block->faculty ? $block->faculty->id : null;
+
+                if ($practicalPairKey && $roomId !== null) {
+                    $pairedPracticalRooms[$practicalPairKey] = $roomId;
+                }
 
                 $localAssignments[] = [
                     'department_id' => $deptId,
@@ -668,5 +765,22 @@ class TimetableGenerator
         }
 
         return $hour * 60 + $minute;
+    }
+
+    /**
+     * @return array{0: string, 1: string}|null
+     */
+    private function pairedPracticalBatches(string $batch): ?array
+    {
+        if (preg_match('/^(.*?)([1-4])$/', $batch, $matches) !== 1) {
+            return null;
+        }
+
+        $pairStart = (int) $matches[2] <= 2 ? 1 : 3;
+
+        return [
+            $matches[1].$pairStart,
+            $matches[1].($pairStart + 1),
+        ];
     }
 }

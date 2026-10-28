@@ -292,8 +292,8 @@
 @if ($selectedDepartmentId > 0 && $selectedSemester !== '' && $selectedClass !== '')
     <div class="filter-card">
         <h2>Configure Division Lab Sharing</h2>
-        <p style="color:#6b7280; margin-top:-8px;">Choose divisions saved for this class in Manage Subjects and assign their shared lab.</p>
-        <form method="POST" action="/admin/classroom-allocation">
+        <p style="color:#6b7280; margin-top:-8px;">Choose divisions saved for this class in Manage Subjects and assign their shared lab. Keep practical batch pairs in one group.</p>
+        <form method="POST" action="/admin/classroom-allocation" id="labGroupForm">
             @csrf
             <input type="hidden" name="form_type" value="save-lab-group">
             <input type="hidden" name="department_id" value="{{ $selectedDepartmentId }}">
@@ -523,6 +523,35 @@
                 resultsSubject.dataset.selected = this.value;
             });
         }
+
+        const labGroupForm = document.getElementById('labGroupForm');
+        if (labGroupForm) {
+            labGroupForm.addEventListener('submit', function (event) {
+                const divisionsSelect = labGroupForm.querySelector('select[name="divisions[]"]');
+                const configuredDivisions = Array.from(divisionsSelect.options).map(function (option) {
+                    return option.value;
+                });
+                const selectedDivisions = Array.from(divisionsSelect.selectedOptions).map(function (option) {
+                    return option.value;
+                });
+
+                for (const selectedDivision of selectedDivisions) {
+                    const match = selectedDivision.match(/^(.*?)([1-4])$/);
+                    if (!match) {
+                        continue;
+                    }
+
+                    const pairStart = Number(match[2]) <= 2 ? 1 : 3;
+                    const pairedNumber = Number(match[2]) === pairStart ? pairStart + 1 : pairStart;
+                    const pairedDivision = match[1] + pairedNumber;
+                    if (configuredDivisions.includes(pairedDivision) && !selectedDivisions.includes(pairedDivision)) {
+                        event.preventDefault();
+                        window.alert(selectedDivision + ' and ' + pairedDivision + ' must be included in the same lab group.');
+                        return;
+                    }
+                }
+            });
+        }
         updateResultFilters();
     });
 </script>
@@ -695,7 +724,7 @@
                             <td>{{ $subject?->name ?? '—' }}</td>
                             <td><span class="badge badge-classroom">{{ $subjectType }}</span></td>
                             <td><span class="badge badge-classroom">Classroom</span></td>
-                            <td>{{ $allocation->classroom?->room_number ?? ($allocation->notes ?: '—') }}</td>
+                            <td>{{ $allocation->classroom?->room_number ?? 'No suitable classroom available' }}</td>
                             <td>
                                 <span class="badge {{ $allocation->status === 'Allocated' ? 'badge-allocated' : 'badge-unallocated' }}">
                                     {{ $allocation->status }}

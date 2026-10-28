@@ -77,7 +77,162 @@ it('generates conflict-free sessions using the selected class and lab groups', f
         ->and($entries->where('lecture_type', 'Practical'))->toHaveCount(2)
         ->and($entries->sum('duration'))->toBe(6)
         ->and($entries->firstWhere('activity_batch', 'A1')->faculty_id)->toBe($faculty->id)
-        ->and($entries->firstWhere('activity_batch', 'A2')->faculty_id)->toBe($practicalFaculty->id);
+        ->and($entries->firstWhere('activity_batch', 'A2')->faculty_id)->toBe($practicalFaculty->id)
+        ->and($entries->firstWhere('activity_batch', 'A1')->classroom_id)
+        ->toBe($entries->firstWhere('activity_batch', 'A2')->classroom_id);
+});
+
+it('uses configured theory and paired lab locations and reflects allocation changes in the timetable view', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $theoryFaculty = Faculty::create([
+        'name' => 'Prof. Shah',
+        'email' => 'shah@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+    Faculty::create([
+        'name' => 'Prof. Patel',
+        'email' => 'patel@example.com',
+        'designation' => 'Assistant Professor',
+        'department_id' => $department->id,
+    ]);
+    Division::create(['name' => 'A', 'semester' => '5', 'is_active' => true]);
+    $oldClassroom = Classroom::create([
+        'room_number' => 'ROOM-OLD',
+        'location' => 'North Building',
+        'room_capacity' => 40,
+        'room_type' => 'Classroom',
+        'availability' => 'Available',
+    ]);
+    $newClassroom = Classroom::create([
+        'room_number' => 'ROOM-NEW',
+        'location' => 'South Building',
+        'room_capacity' => 40,
+        'room_type' => 'Classroom',
+        'availability' => 'Available',
+    ]);
+    $firstLab = Classroom::create([
+        'room_number' => 'LAB-A',
+        'room_capacity' => 40,
+        'room_type' => 'Lab',
+        'availability' => 'Available',
+    ]);
+    $secondLab = Classroom::create([
+        'room_number' => 'LAB-B',
+        'room_capacity' => 40,
+        'room_type' => 'Lab',
+        'availability' => 'Available',
+    ]);
+    $replacementLab = Classroom::create([
+        'room_number' => 'LAB-C',
+        'room_capacity' => 40,
+        'room_type' => 'Lab',
+        'availability' => 'Available',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Java Programming',
+        'subject_code' => 'JAVA102',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'faculty_id' => $theoryFaculty->id,
+        'lecture_credit' => 1,
+        'lab_credit' => 1,
+        'tutorial_credit' => 0,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1', 'A2', 'A3', 'A4'],
+        'tutorial_selections' => [],
+    ]);
+
+    RoomAllocation::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'subject_id' => $subject->id,
+        'faculty_id' => $theoryFaculty->id,
+        'classroom_id' => $oldClassroom->id,
+        'class_name' => 'A',
+        'division' => 'A',
+        'allocation_type' => 'Classroom',
+        'student_count' => 30,
+        'status' => 'Allocated',
+    ]);
+    foreach ([
+        'A1' => $firstLab,
+        'A2' => $secondLab,
+        'A3' => $secondLab,
+        'A4' => $firstLab,
+    ] as $batch => $lab) {
+        RoomAllocation::create([
+            'department_id' => $department->id,
+            'semester' => '5',
+            'subject_id' => $subject->id,
+            'faculty_id' => $theoryFaculty->id,
+            'classroom_id' => $lab->id,
+            'class_name' => 'A',
+            'division' => $batch,
+            'allocation_type' => 'Lab',
+            'student_count' => 20,
+            'status' => 'Allocated',
+        ]);
+    }
+
+    expect((new TimetableGenerator)->generate($department->id, '5', 'A', '2026-2027', 'Odd'))->toBeTrue();
+
+    $entries = TimetableEntry::query()
+        ->where('department_id', $department->id)
+        ->where('semester', '5')
+        ->where('division', 'A')
+        ->get();
+    $practicalEntries = $entries->where('lecture_type', 'Practical')->keyBy('activity_batch');
+
+    expect($entries->firstWhere('lecture_type', 'Lecture')->classroom_id)->toBe($oldClassroom->id)
+        ->and($practicalEntries['A1']->classroom_id)->toBe($firstLab->id)
+        ->and($practicalEntries['A2']->classroom_id)->toBe($firstLab->id)
+        ->and($practicalEntries['A3']->classroom_id)->toBe($secondLab->id)
+        ->and($practicalEntries['A4']->classroom_id)->toBe($secondLab->id);
+
+    RoomAllocation::query()
+        ->where('subject_id', $subject->id)
+        ->where('allocation_type', 'Classroom')
+        ->where('division', 'A')
+        ->firstOrFail()
+        ->update(['classroom_id' => $newClassroom->id]);
+    RoomAllocation::query()
+        ->where('subject_id', $subject->id)
+        ->where('allocation_type', 'Lab')
+        ->where('division', 'A1')
+        ->firstOrFail()
+        ->update(['classroom_id' => $replacementLab->id]);
+    $theoryAllocation = RoomAllocation::query()
+        ->where('subject_id', $subject->id)
+        ->where('allocation_type', 'Classroom')
+        ->where('division', 'A')
+        ->firstOrFail();
+
+    $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/timetable?department_id='.$department->id.'&semester=5&division=A')
+        ->assertOk()
+        ->assertSee('Classroom: ROOM-NEW - South Building')
+        ->assertSee('Lab: LAB-C')
+        ->assertDontSee('ROOM-OLD');
+
+    $theoryAllocation->update(['classroom_id' => $firstLab->id]);
+
+    $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/timetable?department_id='.$department->id.'&semester=5&division=A')
+        ->assertOk()
+        ->assertSee('Classroom unavailable')
+        ->assertDontSee('Classroom: LAB-A');
 });
 
 it('refreshes an existing timetable after faculty allocations are regenerated', function () {

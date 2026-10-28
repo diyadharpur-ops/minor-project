@@ -286,13 +286,86 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
 
         $dept = Department::find($deptId);
         $deptName = $dept ? $dept->name : '';
+        $className = $deptName.'-'.$semester.'-'.$division;
+        $managedAllocations = RoomAllocation::with(['classroom', 'secondClassroom'])
+            ->where('department_id', $deptId)
+            ->where('semester', $semester)
+            ->whereIn('class_name', array_values(array_unique([$division, $className])))
+            ->get();
 
         // format to match index.blade.php expectations
         $sessions = [];
         foreach ($entries as $entry) {
-            $roomName = $entry->classroom ? $entry->classroom->room_number : '';
-            if ($entry->notes && str_starts_with($entry->notes, 'Room2:')) {
+            $isPractical = $entry->lecture_type === 'Practical';
+            $allocationType = $isPractical ? 'Lab' : 'Classroom';
+            $activityType = $isPractical ? 'Practical' : $entry->lecture_type;
+            $roomMatchesType = fn (?Classroom $room): bool => $room !== null
+                && ($isPractical
+                    ? str_contains(strtolower((string) $room->room_type), 'lab')
+                    : ! str_contains(strtolower((string) $room->room_type), 'lab'));
+            $batchCandidates = [$entry->activity_batch ?: $division];
+
+            if ($isPractical && $entry->activity_batch
+                && preg_match('/^(.*?)([1-4])$/', $entry->activity_batch, $matches) === 1) {
+                $pairStart = (int) $matches[2] <= 2 ? 1 : 3;
+                $batchCandidates = [
+                    $matches[1].$pairStart,
+                    $matches[1].($pairStart + 1),
+                ];
+            }
+
+            $selectedRoomAllocation = null;
+            $hasMatchingRoomAllocation = false;
+            foreach (array_values(array_unique([...$batchCandidates, $division])) as $batchCandidate) {
+                $matchingAllocations = $managedAllocations
+                    ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                        && $allocation->activity_type === null
+                        && ($allocation->allocation_type === $allocationType || $allocation->allocation_type === null)
+                        && $allocation->division === $batchCandidate)
+                    ->sortByDesc('id');
+                $hasMatchingRoomAllocation = $hasMatchingRoomAllocation || $matchingAllocations->isNotEmpty();
+                $selectedRoomAllocation = $matchingAllocations->first(
+                    fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
+                        && $allocation->classroom?->availability === 'Available'
+                );
+
+                if ($selectedRoomAllocation) {
+                    break;
+                }
+
+                $activityAllocation = $managedAllocations
+                    ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                        && $allocation->activity_type === $activityType
+                        && $allocation->activity_batch === ($entry->activity_batch ?: null))
+                    ->sortByDesc('id')
+                    ->first(fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
+                        && $allocation->classroom?->availability === 'Available');
+                if ($activityAllocation) {
+                    $selectedRoomAllocation = $activityAllocation;
+                    $hasMatchingRoomAllocation = true;
+                    break;
+                }
+            }
+
+            $room = $selectedRoomAllocation?->classroom;
+            $fallbackRoom = $roomMatchesType($entry->classroom)
+                && $entry->classroom?->availability === 'Available'
+                ? $entry->classroom
+                : null;
+            $roomLabel = $isPractical ? 'Lab' : 'Classroom';
+            $roomName = $room
+                ? $roomLabel.': '.$room->room_number.($room->location ? ' - '.$room->location : '')
+                : ($hasMatchingRoomAllocation
+                    ? $roomLabel.' unavailable'
+                    : ($fallbackRoom
+                        ? $roomLabel.': '.$fallbackRoom->room_number.($fallbackRoom->location ? ' - '.$fallbackRoom->location : '')
+                        : $roomLabel.' unavailable'));
+            if (! $selectedRoomAllocation && ! $hasMatchingRoomAllocation
+                && $entry->notes && str_starts_with($entry->notes, 'Room2:')) {
                 $roomName .= ' + '.substr($entry->notes, 6);
+            } elseif ($selectedRoomAllocation?->secondClassroom) {
+                $secondRoom = $selectedRoomAllocation->secondClassroom;
+                $roomName .= ' + '.$secondRoom->room_number.($secondRoom->location ? ' - '.$secondRoom->location : '');
             }
 
             $sessions[] = [
@@ -1874,6 +1947,22 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
                 ]);
             }
 
+            foreach ($data['divisions'] as $selectedDivision) {
+                if (preg_match('/^(.*?)([1-4])$/', $selectedDivision, $matches) !== 1) {
+                    continue;
+                }
+
+                $pairStart = (int) $matches[2] <= 2 ? 1 : 3;
+                $pairNumber = (int) $matches[2] === $pairStart ? $pairStart + 1 : $pairStart;
+                $pairedDivision = $matches[1].$pairNumber;
+                if (in_array($pairedDivision, $availableDivisions, true)
+                    && ! in_array($pairedDivision, $data['divisions'], true)) {
+                    throw ValidationException::withMessages([
+                        'divisions' => "{$selectedDivision} and {$pairedDivision} must be included in the same lab group.",
+                    ]);
+                }
+            }
+
             $lab = Classroom::query()
                 ->whereKey($data['classroom_id'])
                 ->where('availability', 'Available')
@@ -2036,6 +2125,82 @@ Route::match(['get', 'post'], '/admin/classroom-allocation', function (Request $
     }
 
     $allocations = $allocQuery->paginate(15)->withQueryString();
+    $availableClassrooms = Classroom::query()
+        ->where('availability', 'Available')
+        ->where('room_type', 'not like', '%lab%')
+        ->whereNotNull('room_number')
+        ->orderBy('room_capacity')
+        ->orderBy('room_number')
+        ->get();
+    $pairedLabRoomIds = [];
+    $labAllocations = RoomAllocation::query()
+        ->with('classroom')
+        ->whereNull('activity_type')
+        ->where('allocation_type', 'Lab')
+        ->whereNotNull('division')
+        ->get();
+
+    foreach ($labAllocations as $labAllocation) {
+        if (preg_match('/^(.*?)([1-4])$/', (string) $labAllocation->division, $matches) !== 1) {
+            continue;
+        }
+
+        $pairStart = (int) $matches[2] <= 2 ? 1 : 3;
+        $pairKey = implode('|', [
+            $labAllocation->department_id,
+            $labAllocation->semester,
+            $labAllocation->class_name,
+            $labAllocation->subject_id,
+            $matches[1],
+            $pairStart,
+        ]);
+        $room = $labAllocation->classroom;
+        if (! $room
+            || $room->availability !== 'Available'
+            || ! str_contains(strtolower((string) $room->room_type), 'lab')) {
+            continue;
+        }
+
+        if (! isset($pairedLabRoomIds[$pairKey]) || (int) $matches[2] === $pairStart) {
+            $pairedLabRoomIds[$pairKey] = $room;
+        }
+    }
+
+    foreach ($allocations as $allocation) {
+        if ($allocation->allocation_type === 'Lab'
+            && preg_match('/^(.*?)([1-4])$/', (string) $allocation->division, $matches) === 1) {
+            $pairStart = (int) $matches[2] <= 2 ? 1 : 3;
+            $pairKey = implode('|', [
+                $allocation->department_id,
+                $allocation->semester,
+                $allocation->class_name,
+                $allocation->subject_id,
+                $matches[1],
+                $pairStart,
+            ]);
+            $pairedRoom = $pairedLabRoomIds[$pairKey] ?? null;
+
+            if ($pairedRoom) {
+                $allocation->setRelation('classroom', $pairedRoom);
+                $allocation->setRelation('secondClassroom', null);
+            }
+
+            continue;
+        }
+
+        $room = $allocation->classroom;
+        $roomIsClassroom = $room
+            && $room->availability === 'Available'
+            && ! str_contains(strtolower((string) $room->room_type), 'lab');
+
+        if (! $roomIsClassroom) {
+            $studentCount = (int) ($allocation->student_count ?? 0);
+            $replacementClassroom = $availableClassrooms->first(
+                fn (Classroom $classroom): bool => (int) $classroom->room_capacity >= $studentCount
+            );
+            $allocation->setRelation('classroom', $replacementClassroom);
+        }
+    }
     $selectedDivisions = filled($selectedDepartmentId) && $selectedSemester !== '' && $selectedClass !== ''
         ? $allocationService->divisionsForSelection($selectedDepartmentId, $selectedSemester, $selectedClass)
         : [];
@@ -2272,7 +2437,7 @@ Route::post('/faculty/login', function (Request $request) {
 
     try {
         $passwordMatches = Hash::check($data['password'], $storedPassword);
-    } catch (\RuntimeException $e) {
+    } catch (RuntimeException $e) {
         $passwordMatches = hash_equals($storedPassword, $data['password']);
 
         if ($passwordMatches) {
@@ -2315,7 +2480,7 @@ Route::post('/student/login', function (Request $request) {
 
     try {
         $passwordMatches = Hash::check($data['password'], $storedPassword);
-    } catch (\RuntimeException $e) {
+    } catch (RuntimeException $e) {
         $passwordMatches = hash_equals($storedPassword, $data['password']);
 
         if ($passwordMatches) {

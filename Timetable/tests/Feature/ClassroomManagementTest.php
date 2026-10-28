@@ -1,5 +1,9 @@
 <?php
 
+use App\Models\Classroom;
+use App\Models\Department;
+use App\Models\RoomAllocation;
+use App\Models\Subject;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -52,7 +56,7 @@ test('admin classroom allocation page loads without demo data', function () {
         ],
     ])->get('/admin/classroom-allocation');
 
-    $html = $response->getContent();
+    $html = html_entity_decode($response->getContent());
     $firstIndex = mb_strpos($html, 'Classroom & Lab Allocation');
     $secondIndex = mb_strpos($html, 'Allocation Results');
 
@@ -62,43 +66,43 @@ test('admin classroom allocation page loads without demo data', function () {
 });
 
 test('auto allocation keeps lab and classroom assignments strictly type-matched and combines lab rooms for higher capacity', function () {
-    $department = \App\Models\Department::create([
+    $department = Department::create([
         'name' => 'Computer Science',
         'code' => 'CS',
     ]);
 
-    \App\Models\Classroom::create([
+    Classroom::create([
         'room_number' => 'F111',
         'room_capacity' => 80,
         'room_type' => 'Classroom',
         'availability' => 'Available',
     ]);
-    \App\Models\Classroom::create([
+    Classroom::create([
         'room_number' => 'F112',
         'room_capacity' => 80,
         'room_type' => 'Classroom',
         'availability' => 'Available',
     ]);
-    \App\Models\Classroom::create([
+    Classroom::create([
         'room_number' => 'F007',
         'room_capacity' => 40,
         'room_type' => 'Lab',
         'availability' => 'Available',
     ]);
-    \App\Models\Classroom::create([
+    Classroom::create([
         'room_number' => 'F010',
         'room_capacity' => 40,
         'room_type' => 'Lab',
         'availability' => 'Available',
     ]);
-    \App\Models\Classroom::create([
+    Classroom::create([
         'room_number' => 'F011',
         'room_capacity' => 40,
         'room_type' => 'Lab',
         'availability' => 'Available',
     ]);
 
-    \App\Models\Subject::create([
+    Subject::create([
         'name' => 'Application Design & Development using Vibe Coding',
         'subject_code' => 'APP-101',
         'semester' => '5',
@@ -108,7 +112,7 @@ test('auto allocation keeps lab and classroom assignments strictly type-matched 
         'subject_type' => 'Classroom',
     ]);
 
-    \App\Models\Subject::create([
+    Subject::create([
         'name' => 'Computer Hardware and Maintenance',
         'subject_code' => 'CHM-101',
         'semester' => '5',
@@ -126,11 +130,11 @@ test('auto allocation keeps lab and classroom assignments strictly type-matched 
     ])->post('/admin/classroom-allocation', ['form_type' => 'auto-allocate'])
         ->assertRedirect('/admin/classroom-allocation');
 
-    $classroomAllocation = \App\Models\RoomAllocation::whereHas('subject', function ($query) {
+    $classroomAllocation = RoomAllocation::whereHas('subject', function ($query) {
         $query->where('subject_code', 'APP-101');
     })->first();
 
-    $labAllocation = \App\Models\RoomAllocation::whereHas('subject', function ($query) {
+    $labAllocation = RoomAllocation::whereHas('subject', function ($query) {
         $query->where('subject_code', 'CHM-101');
     })->first();
 
@@ -143,25 +147,25 @@ test('auto allocation keeps lab and classroom assignments strictly type-matched 
 });
 
 test('division lab groups share configured rooms and regenerate without stale or duplicate divisions', function () {
-    $department = \App\Models\Department::create([
+    $department = Department::create([
         'name' => 'Computer Science',
         'code' => 'CS',
     ]);
 
-    $firstLab = \App\Models\Classroom::create([
+    $firstLab = Classroom::create([
         'room_number' => 'LAB-A',
         'room_capacity' => 80,
         'room_type' => 'Lab',
         'availability' => 'Available',
     ]);
-    $secondLab = \App\Models\Classroom::create([
+    $secondLab = Classroom::create([
         'room_number' => 'LAB-B',
         'room_capacity' => 80,
         'room_type' => 'Lab',
         'availability' => 'Available',
     ]);
 
-    $subject = \App\Models\Subject::create([
+    $subject = Subject::create([
         'name' => 'Information Systems',
         'subject_code' => 'IS-201',
         'semester' => '5',
@@ -210,7 +214,7 @@ test('division lab groups share configured rooms and regenerate without stale or
     $this->withSession($adminSession)->post('/admin/classroom-allocation', $allocationRequest)
         ->assertRedirect();
 
-    $allocations = \App\Models\RoomAllocation::query()
+    $allocations = RoomAllocation::query()
         ->where('subject_id', $subject->id)
         ->where('allocation_type', 'Lab')
         ->orderBy('division')
@@ -224,7 +228,7 @@ test('division lab groups share configured rooms and regenerate without stale or
     $secondLab->update(['availability' => 'Maintenance']);
     $this->withSession($adminSession)->post('/admin/classroom-allocation', $allocationRequest)
         ->assertRedirect();
-    $unallocatedDivisions = \App\Models\RoomAllocation::query()
+    $unallocatedDivisions = RoomAllocation::query()
         ->where('subject_id', $subject->id)
         ->where('allocation_type', 'Lab')
         ->whereIn('division', ['A3', 'A4'])
@@ -239,7 +243,7 @@ test('division lab groups share configured rooms and regenerate without stale or
     $this->withSession($adminSession)->post('/admin/classroom-allocation', $allocationRequest)
         ->assertRedirect();
 
-    expect(\App\Models\RoomAllocation::query()
+    expect(RoomAllocation::query()
         ->where('subject_id', $subject->id)
         ->where('allocation_type', 'Lab')
         ->orderBy('division')
@@ -247,13 +251,219 @@ test('division lab groups share configured rooms and regenerate without stale or
         ->all())->toBe(['A1', 'A2']);
 });
 
-test('filtered auto allocation rejects classes not selected for the department semester in manage subjects', function () {
-    $department = \App\Models\Department::create([
+test('unconfigured practical batches automatically share one lab per paired group', function () {
+    $department = Department::create([
         'name' => 'Computer Science',
         'code' => 'CS',
     ]);
 
-    \App\Models\Subject::create([
+    Classroom::create([
+        'room_number' => 'LAB-A',
+        'room_capacity' => 80,
+        'room_type' => 'Lab',
+        'availability' => 'Available',
+    ]);
+    Classroom::create([
+        'room_number' => 'LAB-B',
+        'room_capacity' => 80,
+        'room_type' => 'Lab',
+        'availability' => 'Available',
+    ]);
+    Subject::create([
+        'name' => 'Information Systems',
+        'subject_code' => 'IS-203',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'subject_type' => 'Lab',
+        'lecture_credit' => 0,
+        'lab_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1', 'A2', 'A3', 'A4'],
+        'tutorial_selections' => [],
+    ]);
+
+    $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->post('/admin/classroom-allocation', [
+        'form_type' => 'filtered-auto-allocate',
+        'department_id' => $department->id,
+        'semester' => '5',
+        'class' => 'A',
+    ])->assertRedirect();
+
+    $allocations = RoomAllocation::query()
+        ->where('department_id', $department->id)
+        ->where('allocation_type', 'Lab')
+        ->orderBy('division')
+        ->get()
+        ->keyBy('division');
+
+    expect($allocations)->toHaveCount(4)
+        ->and($allocations['A1']->classroom_id)->toBe($allocations['A2']->classroom_id)
+        ->and($allocations['A3']->classroom_id)->toBe($allocations['A4']->classroom_id)
+        ->and($allocations['A1']->classroom_id)->not->toBe($allocations['A3']->classroom_id);
+});
+
+test('allocation results display one existing lab for each practical batch pair', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Information Systems',
+        'subject_code' => 'IS-205',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'subject_type' => 'Lab',
+        'lecture_credit' => 0,
+        'lab_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1', 'A2', 'A3', 'A4'],
+        'tutorial_selections' => [],
+    ]);
+    $labs = collect([
+        ['room_number' => 'LAB-A', 'room_capacity' => 40, 'room_type' => 'Lab', 'availability' => 'Available'],
+        ['room_number' => 'LAB-B', 'room_capacity' => 40, 'room_type' => 'Lab', 'availability' => 'Available'],
+        ['room_number' => 'LAB-C', 'room_capacity' => 40, 'room_type' => 'Lab', 'availability' => 'Available'],
+        ['room_number' => 'LAB-D', 'room_capacity' => 40, 'room_type' => 'Lab', 'availability' => 'Available'],
+    ])->map(fn (array $lab): Classroom => Classroom::create($lab));
+
+    foreach (['A1' => 0, 'A2' => 1, 'A3' => 2, 'A4' => 3] as $division => $labIndex) {
+        RoomAllocation::create([
+            'department_id' => $department->id,
+            'semester' => '5',
+            'subject_id' => $subject->id,
+            'classroom_id' => $labs[$labIndex]->id,
+            'class_name' => 'A',
+            'division' => $division,
+            'allocation_type' => 'Lab',
+            'status' => 'Allocated',
+        ]);
+    }
+
+    $response = $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/classroom-allocation?department_id='.$department->id.'&semester=5&class=A&subject_id='.$subject->id);
+
+    $response->assertOk()
+        ->assertSee('<td>LAB-A</td>', false)
+        ->assertSee('<td>LAB-C</td>', false)
+        ->assertDontSee('<td>LAB-B</td>', false)
+        ->assertDontSee('<td>LAB-D</td>', false);
+    expect(substr_count($response->getContent(), '<td>LAB-A</td>'))->toBe(2)
+        ->and(substr_count($response->getContent(), '<td>LAB-C</td>'))->toBe(2);
+});
+
+test('allocation results show an existing classroom number instead of a lab for lecture rows', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $classroom = Classroom::create([
+        'room_number' => 'ROOM-201',
+        'room_capacity' => 60,
+        'room_type' => 'Classroom',
+        'availability' => 'Available',
+    ]);
+    $lab = Classroom::create([
+        'room_number' => 'LAB-201',
+        'room_capacity' => 60,
+        'room_type' => 'Lab',
+        'availability' => 'Available',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Algorithms',
+        'subject_code' => 'CS-205',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'subject_type' => 'Lecture',
+        'lecture_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => [],
+        'tutorial_selections' => [],
+    ]);
+    $allocation = RoomAllocation::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'subject_id' => $subject->id,
+        'classroom_id' => $lab->id,
+        'class_name' => 'A',
+        'division' => 'A',
+        'allocation_type' => 'Classroom',
+        'student_count' => 30,
+        'status' => 'Allocated',
+        'notes' => $lab->room_number,
+    ]);
+
+    $response = $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/classroom-allocation?department_id='.$department->id.'&semester=5&class=A&subject_id='.$subject->id);
+
+    $response->assertOk()
+        ->assertSee('<td>'.$classroom->room_number.'</td>', false)
+        ->assertDontSee('<td>'.$lab->room_number.'</td>', false);
+
+    expect($allocation->fresh()->classroom_id)->toBe($lab->id);
+});
+
+test('lab group validation requires configured practical batch pairs to stay together', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $lab = Classroom::create([
+        'room_number' => 'LAB-A',
+        'room_capacity' => 80,
+        'room_type' => 'Lab',
+        'availability' => 'Available',
+    ]);
+    Subject::create([
+        'name' => 'Information Systems',
+        'subject_code' => 'IS-204',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'subject_type' => 'Lab',
+        'lecture_credit' => 0,
+        'lab_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1', 'A2'],
+        'tutorial_selections' => [],
+    ]);
+
+    $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->post('/admin/classroom-allocation', [
+        'form_type' => 'save-lab-group',
+        'department_id' => $department->id,
+        'semester' => '5',
+        'class_name' => 'A',
+        'group_name' => 'First practical group',
+        'divisions' => ['A1'],
+        'classroom_id' => $lab->id,
+    ])->assertSessionHasErrors('divisions');
+
+    $this->assertDatabaseCount('lab_allocation_groups', 0);
+});
+
+test('filtered auto allocation rejects classes not selected for the department semester in manage subjects', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+
+    Subject::create([
         'name' => 'Information Systems',
         'subject_code' => 'IS-202',
         'semester' => '5',
