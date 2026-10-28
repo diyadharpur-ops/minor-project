@@ -142,6 +142,26 @@
         border-bottom: none;
     }
 
+    .lab-cell-content {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 3px;
+        padding: 4px 2px;
+        font-family: inherit;
+    }
+
+    .lab-batch-line {
+        font-weight: 700;
+        font-size: 11.5px;
+        line-height: 1.35;
+        color: #000000;
+        letter-spacing: 0.3px;
+        text-align: center;
+        white-space: nowrap;
+    }
+
     .batch-tag {
         font-weight: 800;
         margin-right: 4px;
@@ -381,11 +401,60 @@
                                 @php
                                     $cellSessions = $grid[$day][$slotKey] ?? collect();
                                     $rs = $rowspans[$day][$slotKey] ?? 1;
+
+                                    $isLabSlot = $cellSessions->contains(function ($s) {
+                                        $t = strtolower($s['type'] ?? '');
+                                        return str_contains($t, 'practical') || str_contains($t, 'lab');
+                                    });
+                                    $labBatchLines = [];
+                                    if ($isLabSlot) {
+                                        $batchesSeen = [];
+
+                                        // 1. Check pre-computed lab_batches from any practical session in this cell
+                                        foreach ($cellSessions as $s) {
+                                            $t = strtolower($s['type'] ?? '');
+                                            if ((str_contains($t, 'practical') || str_contains($t, 'lab')) && !empty($s['lab_batches'])) {
+                                                foreach ($s['lab_batches'] as $lb) {
+                                                    $bKey = $lb['batch'] ?? '';
+                                                    if (!isset($batchesSeen[$bKey])) {
+                                                        $batchesSeen[$bKey] = true;
+                                                        $labBatchLines[] = $lb['line'] ?? "{$lb['batch']}-{$lb['subject_code']}-{$lb['faculty_initials']}-{$lb['room']}";
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // 2. If no pre-computed lab_batches, fallback to individual batch sessions
+                                        if (empty($labBatchLines)) {
+                                            foreach ($cellSessions as $s) {
+                                                $t = strtolower($s['type'] ?? '');
+                                                if (str_contains($t, 'practical') || str_contains($t, 'lab')) {
+                                                    $bKey = $s['batch'] ?? '';
+                                                    if (!empty($bKey) && !isset($batchesSeen[$bKey])) {
+                                                        $batchesSeen[$bKey] = true;
+                                                        $rawSub = !empty($s['subject']) && strlen($s['subject']) <= 8 ? $s['subject'] : ($s['subject_code'] ?: $s['subject']);
+                                                        $bCode = strtoupper(trim(preg_replace('/\s*\(.*?\)\s*/', '', (string)$rawSub)));
+                                                        $bFac = $s['faculty_initials'] ?: ($s['faculty'] ?: 'DF');
+                                                        $bRoom = strtoupper(trim(preg_replace('/^Lab:\s*/i', '', (string)($s['room_number'] ?: $s['room']))));
+                                                        $labBatchLines[] = "{$bKey}-{$bCode}-{$bFac}-{$bRoom}";
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        sort($labBatchLines);
+                                    }
                                 @endphp
 
                                 <td rowspan="{{ $rs }}">
                                     @if ($cellSessions->isEmpty())
                                         <span style="color: #666;">-</span>
+                                    @elseif ($isLabSlot && !empty($labBatchLines))
+                                        <div class="lab-cell-content">
+                                            @foreach ($labBatchLines as $bLine)
+                                                <div class="lab-batch-line">{{ $bLine }}</div>
+                                            @endforeach
+                                        </div>
                                     @elseif ($cellSessions->count() === 1)
                                         @php
                                             $s = $cellSessions->first();

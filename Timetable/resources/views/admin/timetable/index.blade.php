@@ -689,7 +689,6 @@
                                         $t = strtolower($s['type'] ?? '');
                                         return str_contains($t, 'practical') || str_contains($t, 'lab');
                                     });
-
                                     $labBatchLines = [];
                                     if ($isLabSlot) {
                                         $batchesSeen = [];
@@ -735,7 +734,6 @@
                                     @if ($cellSessions->isEmpty())
                                         <span style="color: #666;">-</span>
                                     @elseif ($isLabSlot && !empty($labBatchLines))
-                                        {{-- LAB / PRACTICAL SLOT DISPLAY FORMAT: Vertically, one below another --}}
                                         <div class="lab-cell-content">
                                             @foreach ($labBatchLines as $bLine)
                                                 <div class="lab-batch-line">{{ $bLine }}</div>

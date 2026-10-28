@@ -33,7 +33,7 @@
         <div class="alert alert-success">{{ session('status') }}</div>
     @endif
     @if(session('error'))
-        <div class="alert alert-danger">{{ session('error') }}</div>
+        <div class="alert alert-danger" style="white-space: pre-line;">{{ session('error') }}</div>
     @endif
     @if(session('faculty_allocation_warnings'))
         <div class="alert" style="background:#fff7ed;color:#9a4d00;">

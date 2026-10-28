@@ -7,6 +7,7 @@ use App\Models\Faculty;
 use App\Models\RoomAllocation;
 use App\Models\Subject;
 use App\Models\TimetableEntry;
+use App\Models\User;
 use App\Services\TimetableGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -76,6 +77,10 @@ it('generates conflict-free sessions using the selected class and lab groups', f
     expect($entries)->toHaveCount(4)
         ->and($entries->where('lecture_type', 'Practical'))->toHaveCount(2)
         ->and($entries->sum('duration'))->toBe(6)
+        ->and($entries->where('lecture_type', 'Practical')->every(
+            fn (TimetableEntry $entry): bool => $entry->duration === 2
+                && in_array($entry->time_slot, ['10:30-11:30', '01:00-02:00', '03:10-04:10'], true)
+        ))->toBeTrue()
         ->and($entries->firstWhere('activity_batch', 'A1')->faculty_id)->toBe($faculty->id)
         ->and($entries->firstWhere('activity_batch', 'A2')->faculty_id)->toBe($practicalFaculty->id)
         ->and($entries->firstWhere('activity_batch', 'A1')->classroom_id)
@@ -275,7 +280,7 @@ it('uses configured theory and paired lab locations and reflects allocation chan
     ])->get('/admin/timetable?department_id='.$department->id.'&semester=5&division=A')
         ->assertOk()
         ->assertSee('Classroom: ROOM-NEW - South Building')
-        ->assertSee('Lab: LAB-C')
+        ->assertSee('LAB-C')
         ->assertDontSee('ROOM-OLD');
 
     $theoryAllocation->update(['classroom_id' => $firstLab->id]);
@@ -402,4 +407,638 @@ it('refreshes an existing timetable after faculty allocations are regenerated', 
             ->where('subject_id', $subject->id)
             ->where('activity_batch', 'A2')
             ->first()->faculty_id)->toBe($manualFaculty->id);
+});
+
+test('class-wise batch filtering prevents cross-class practical and tutorial leakage and pairs locations', function (): void {
+    $department = Department::create([
+        'name' => 'Computer Engineering',
+        'code' => 'COMP',
+    ]);
+
+    $faculty = Faculty::create([
+        'name' => 'Dr. Alpha Lecturer',
+        'email' => 'alpha@test.com',
+        'department_id' => $department->id,
+    ]);
+    foreach (['beta', 'gamma', 'delta'] as $name) {
+        Faculty::create([
+            'name' => 'Dr. '.ucfirst($name).' Instructor',
+            'email' => $name.'@test.com',
+            'department_id' => $department->id,
+        ]);
+    }
+
+    $lab1 = Classroom::create([
+        'room_number' => 'F108',
+        'room_type' => 'Computer Lab',
+        'room_capacity' => 40,
+        'availability' => 'Available',
+    ]);
+    $lab2 = Classroom::create([
+        'room_number' => 'F102',
+        'room_type' => 'Computer Lab',
+        'room_capacity' => 40,
+        'availability' => 'Available',
+    ]);
+    $classRoom1 = Classroom::create([
+        'room_number' => 'F201',
+        'room_type' => 'Classroom',
+        'room_capacity' => 60,
+        'availability' => 'Available',
+    ]);
+    $classRoom2 = Classroom::create([
+        'room_number' => 'F202',
+        'room_type' => 'Classroom',
+        'room_capacity' => 60,
+        'availability' => 'Available',
+    ]);
+
+    $subjectA = Subject::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'name' => 'IIOT',
+        'subject_code' => 'IIOT301',
+        'subject_type' => 'Integrated',
+        'credit' => 3,
+        'lab_credit' => 2,
+        'tutorial_credit' => 1,
+        'faculty_id' => $faculty->id,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1', 'A2', 'A3', 'A4'],
+        'tutorial_selections' => ['AT1', 'AT2', 'AT3', 'AT4'],
+    ]);
+
+    $subjectB = Subject::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'name' => 'Cloud Computing',
+        'subject_code' => 'CC302',
+        'subject_type' => 'Integrated',
+        'credit' => 3,
+        'lab_credit' => 2,
+        'tutorial_credit' => 1,
+        'faculty_id' => $faculty->id,
+        'class_selections' => ['B'],
+        'division_selections' => ['B1', 'B2', 'B3', 'B4'],
+        'tutorial_selections' => ['BT1', 'BT2', 'BT3', 'BT4'],
+    ]);
+
+    // Room allocations for Class A
+    // Lab: A1 & A2 -> F108; A3 & A4 -> F102
+    RoomAllocation::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'subject_id' => $subjectA->id,
+        'classroom_id' => $lab1->id,
+        'division' => 'A1',
+        'allocation_type' => 'Lab',
+        'student_count' => 20,
+        'status' => 'Allocated',
+    ]);
+    RoomAllocation::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'subject_id' => $subjectA->id,
+        'classroom_id' => $lab2->id,
+        'division' => 'A3',
+        'allocation_type' => 'Lab',
+        'student_count' => 20,
+        'status' => 'Allocated',
+    ]);
+
+    // Tutorials: AT1 & AT2 -> F201; AT3 & AT4 -> F202
+    RoomAllocation::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'subject_id' => $subjectA->id,
+        'classroom_id' => $classRoom1->id,
+        'division' => 'AT1',
+        'allocation_type' => 'Classroom',
+        'student_count' => 20,
+        'status' => 'Allocated',
+    ]);
+    RoomAllocation::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'subject_id' => $subjectA->id,
+        'classroom_id' => $classRoom2->id,
+        'division' => 'AT3',
+        'allocation_type' => 'Classroom',
+        'student_count' => 20,
+        'status' => 'Allocated',
+    ]);
+
+    // Generate timetables for both A and B
+    expect((new TimetableGenerator)->generate($department->id, '5', 'A', '2026-2027', 'Odd'))->toBeTrue();
+    expect((new TimetableGenerator)->generate($department->id, '5', 'B', '2026-2027', 'Odd'))->toBeTrue();
+
+    // Verify Class A view:
+    $responseA = $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/timetable?department_id='.$department->id.'&semester=5&division=A');
+
+    $responseA->assertOk();
+    // Class A batches and tutorial groups must be present
+    $responseA->assertSee('A1-IIOT');
+    $responseA->assertSee('A2-IIOT');
+    $responseA->assertSee('A3-IIOT');
+    $responseA->assertSee('A4-IIOT');
+    // Class A lab paired locations: A1 and A2 share F108, A3 and A4 share F102
+    $responseA->assertSee('A1-IIOT-DAL-F108');
+    $responseA->assertSee('A2-IIOT-DAL-F108');
+    $responseA->assertSee('A3-IIOT-DAL-F102');
+    $responseA->assertSee('A4-IIOT-DAL-F102');
+
+    // Class B batches must never appear in Class A's timetable
+    $responseA->assertDontSee('B1-');
+    $responseA->assertDontSee('B2-');
+    $responseA->assertDontSee('B3-');
+    $responseA->assertDontSee('B4-');
+    $responseA->assertDontSee('BT1');
+    $responseA->assertDontSee('BT2');
+    $responseA->assertDontSee('BT3');
+    $responseA->assertDontSee('BT4');
+});
+
+it('schedules a tutorial after earlier slots are occupied without changing its assigned faculty', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $faculty = Faculty::create([
+        'name' => 'Prof. Shah',
+        'email' => 'shah@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+    $room = Classroom::create([
+        'room_number' => 'A101',
+        'room_capacity' => 40,
+        'room_type' => 'Classroom',
+        'availability' => 'Available',
+    ]);
+    Division::create(['name' => 'A', 'semester' => '5', 'is_active' => true]);
+    $subject = Subject::create([
+        'name' => 'Advanced Data and Virtual Computing',
+        'subject_code' => 'ADDVC',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'faculty_id' => $faculty->id,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'tutorial_selections' => ['AT1'],
+    ]);
+
+    RoomAllocation::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'subject_id' => $subject->id,
+        'faculty_id' => $faculty->id,
+        'classroom_id' => $room->id,
+        'class_name' => 'A',
+        'division' => 'AT1',
+        'allocation_type' => 'Classroom',
+        'activity_type' => 'Tutorial',
+        'activity_batch' => 'AT1',
+        'student_count' => 30,
+        'status' => 'Allocated',
+    ]);
+
+    foreach (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as $day) {
+        TimetableEntry::create([
+            'department_id' => $department->id,
+            'semester' => '5',
+            'division' => 'B',
+            'academic_year' => '2026-2027',
+            'term' => 'Odd',
+            'day' => $day,
+            'time_slot' => '10:30-11:30',
+            'subject_id' => $subject->id,
+            'faculty_id' => $faculty->id,
+            'classroom_id' => $room->id,
+            'lecture_type' => 'Lecture',
+            'duration' => 1,
+        ]);
+    }
+
+    $generator = new TimetableGenerator;
+    expect($generator->generate($department->id, '5', 'A', '2026-2027', 'Odd', false))->toBeTrue()
+        ->and($generator->generate($department->id, '5', 'A', '2026-2027', 'Odd', false))->toBeTrue();
+
+    $entry = TimetableEntry::query()
+        ->where('department_id', $department->id)
+        ->where('semester', '5')
+        ->where('division', 'A')
+        ->firstOrFail();
+
+    expect($entry->faculty_id)->toBe($faculty->id)
+        ->and($entry->classroom_id)->toBe($room->id)
+        ->and($entry->time_slot)->not->toBe('10:30-11:30')
+        ->and(TimetableEntry::query()->where('division', 'B')->count())->toBe(6);
+});
+
+it('keeps paired tutorial groups in their configured shared room at different times', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $firstFaculty = Faculty::create([
+        'name' => 'Prof. Shah',
+        'email' => 'shah@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+    $secondFaculty = Faculty::create([
+        'name' => 'Prof. Patel',
+        'email' => 'patel@example.com',
+        'designation' => 'Assistant Professor',
+        'department_id' => $department->id,
+    ]);
+    $room = Classroom::create([
+        'room_number' => 'TUTORIAL-1',
+        'room_capacity' => 40,
+        'room_type' => 'Classroom',
+        'availability' => 'Available',
+    ]);
+    Division::create(['name' => 'A', 'semester' => '5', 'is_active' => true]);
+    $subject = Subject::create([
+        'name' => 'Advanced Data and Virtual Computing',
+        'subject_code' => 'ADDVC',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'faculty_id' => $firstFaculty->id,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'tutorial_selections' => ['AT1', 'AT2'],
+    ]);
+
+    foreach ([
+        ['batch' => 'AT1', 'faculty' => $firstFaculty],
+        ['batch' => 'AT2', 'faculty' => $secondFaculty],
+    ] as $allocation) {
+        RoomAllocation::create([
+            'department_id' => $department->id,
+            'semester' => '5',
+            'subject_id' => $subject->id,
+            'faculty_id' => $allocation['faculty']->id,
+            'classroom_id' => $room->id,
+            'class_name' => 'A',
+            'division' => $allocation['batch'],
+            'allocation_type' => 'Classroom',
+            'activity_type' => 'Tutorial',
+            'activity_batch' => $allocation['batch'],
+            'student_count' => 20,
+            'status' => 'Allocated',
+        ]);
+    }
+
+    expect((new TimetableGenerator)->generate($department->id, '5', 'A', '2026-2027', 'Odd', false))->toBeTrue();
+
+    $entries = TimetableEntry::query()
+        ->where('department_id', $department->id)
+        ->where('semester', '5')
+        ->where('division', 'A')
+        ->get()
+        ->keyBy('activity_batch');
+
+    expect($entries)->toHaveCount(2)
+        ->and($entries['AT1']->faculty_id)->toBe($firstFaculty->id)
+        ->and($entries['AT2']->faculty_id)->toBe($secondFaculty->id)
+        ->and($entries['AT1']->classroom_id)->toBe($room->id)
+        ->and($entries['AT2']->classroom_id)->toBe($room->id)
+        ->and($entries['AT1']->day.'|'.$entries['AT1']->time_slot)
+        ->not->toBe($entries['AT2']->day.'|'.$entries['AT2']->time_slot);
+});
+
+it('renders scheduled tutorial groups in the existing session format with their allocated rooms', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $faculties = collect([
+        'YP' => 'Prof. Y P',
+        'B' => 'Prof. Beta',
+        'N' => 'Prof. N',
+        'P' => 'Prof. P',
+        'C' => 'Prof. C',
+        'D' => 'Prof. D',
+    ])->map(fn (string $name, string $initials): Faculty => Faculty::create([
+        'name' => $name,
+        'email' => strtolower($initials).'@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]));
+    $rooms = collect(['F111', 'F108', 'F112', 'F113'])->mapWithKeys(fn (string $roomNumber): array => [
+        $roomNumber => Classroom::create([
+            'room_number' => $roomNumber,
+            'room_capacity' => 40,
+            'room_type' => 'Classroom',
+            'availability' => 'Available',
+        ]),
+    ]);
+    Division::create(['name' => 'A', 'semester' => '5', 'is_active' => true]);
+    $addvc = Subject::create([
+        'name' => 'Advanced Data and Virtual Computing',
+        'subject_code' => 'ADDVC',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'faculty_id' => $faculties['YP']->id,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'tutorial_selections' => ['AT1', 'AT2', 'AT3', 'AT4', 'BT1'],
+    ]);
+    $cloud = Subject::create([
+        'name' => 'Cloud Computing',
+        'subject_code' => 'CLOUD',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'faculty_id' => $faculties['C']->id,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'tutorial_selections' => ['AT1', 'AT2'],
+    ]);
+
+    $createTutorialAllocations = function (Subject $subject, array $allocations) use ($department, $faculties, $rooms): void {
+        foreach ($allocations as $batch => [$facultyInitials, $roomNumber]) {
+            RoomAllocation::create([
+                'department_id' => $department->id,
+                'semester' => '5',
+                'subject_id' => $subject->id,
+                'faculty_id' => $faculties[$facultyInitials]->id,
+                'classroom_id' => $rooms[$roomNumber]->id,
+                'class_name' => 'Computer Science-5-A',
+                'division' => 'A',
+                'allocation_type' => 'Classroom',
+                'activity_type' => 'Tutorial',
+                'activity_batch' => $batch,
+                'student_count' => 20,
+                'status' => 'Allocated',
+            ]);
+        }
+    };
+
+    $createTutorialAllocations($addvc, [
+        'AT1' => ['YP', 'F111'],
+        'AT2' => ['B', 'F111'],
+        'AT3' => ['N', 'F108'],
+        'AT4' => ['P', 'F108'],
+        'BT1' => ['D', 'F113'],
+    ]);
+    $createTutorialAllocations($cloud, [
+        'AT1' => ['C', 'F112'],
+        'AT2' => ['D', 'F113'],
+    ]);
+
+    expect((new TimetableGenerator)->generate($department->id, '5', 'A', '2026-2027', 'Odd', false))->toBeTrue();
+
+    $generatedEntries = TimetableEntry::query()
+        ->where('division', 'A')
+        ->where('lecture_type', 'Tutorial')
+        ->get()
+        ->keyBy(fn (TimetableEntry $entry): string => $entry->subject_id.'|'.$entry->activity_batch);
+
+    expect($generatedEntries[$addvc->id.'|AT1']->classroom_id)->toBe($rooms['F111']->id)
+        ->and($generatedEntries[$addvc->id.'|AT2']->classroom_id)->toBe($rooms['F111']->id)
+        ->and($generatedEntries[$addvc->id.'|AT3']->classroom_id)->toBe($rooms['F108']->id)
+        ->and($generatedEntries[$addvc->id.'|AT4']->classroom_id)->toBe($rooms['F108']->id)
+        ->and($generatedEntries[$cloud->id.'|AT1']->classroom_id)->toBe($rooms['F112']->id)
+        ->and($generatedEntries[$cloud->id.'|AT2']->classroom_id)->toBe($rooms['F113']->id);
+
+    $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/timetable?department_id='.$department->id.'&semester=5&division=A&academic_year=2026-2027&term=Odd')
+        ->assertOk()
+        ->assertSee('Tutorial Legend')
+        ->assertSee('ADDVC')
+        ->assertSee('Advanced Data and Virtual Computing')
+        ->assertSee('AT1')
+        ->assertSee('AT2')
+        ->assertSee('AT3')
+        ->assertSee('AT4')
+        ->assertSee('F111')
+        ->assertSee('F108')
+        ->assertDontSee('BT1');
+
+    $student = User::create([
+        'name' => 'A Student',
+        'enrollment_number' => 'CS2026001',
+        'email' => 'student@example.com',
+        'department' => $department->name,
+        'semester' => '5',
+        'student_class' => 'A',
+        'divcon' => 'A',
+        'password' => bcrypt('secret123'),
+    ]);
+
+    $this->withSession([
+        'student.auth' => [
+            'id' => $student->id,
+            'department' => $department->name,
+            'semester' => '5',
+            'student_class' => 'A',
+            'divcon' => 'A',
+        ],
+    ])->get('/student/timetable')
+        ->assertOk()
+        ->assertSee('Tutorial Legend')
+        ->assertSee('ADDVC')
+        ->assertSee('Advanced Data and Virtual Computing')
+        ->assertSee('AT1')
+        ->assertSee('AT2')
+        ->assertSee('AT3')
+        ->assertSee('AT4')
+        ->assertSee('F111')
+        ->assertSee('F108')
+        ->assertDontSee('BT1');
+});
+
+it('preserves the assigned theory faculty when generating lecture and mandatory tutorial sessions', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $subjectFaculty = Faculty::create([
+        'name' => 'Prof. Subject',
+        'email' => 'subject@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+    $allocatedFaculty = Faculty::create([
+        'name' => 'Prof. Allocated',
+        'email' => 'allocated@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+    $room = Classroom::create([
+        'room_number' => 'TUTORIAL-1',
+        'room_capacity' => 40,
+        'room_type' => 'Classroom',
+        'availability' => 'Available',
+    ]);
+    Division::create(['name' => 'A', 'semester' => '5', 'is_active' => true]);
+    $subject = Subject::create([
+        'name' => 'Advanced Data and Virtual Computing',
+        'subject_code' => 'ADDVC',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'faculty_id' => $subjectFaculty->id,
+        'lecture_credit' => 1,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'tutorial_selections' => ['AT1'],
+    ]);
+
+    foreach ([
+        ['type' => 'Lecture', 'batch' => null],
+        ['type' => 'Tutorial', 'batch' => 'AT1'],
+    ] as $activity) {
+        RoomAllocation::create([
+            'department_id' => $department->id,
+            'semester' => '5',
+            'subject_id' => $subject->id,
+            'faculty_id' => $allocatedFaculty->id,
+            'classroom_id' => $room->id,
+            'class_name' => 'Computer Science-5-A',
+            'division' => 'A',
+            'allocation_type' => 'Classroom',
+            'activity_type' => $activity['type'],
+            'activity_batch' => $activity['batch'],
+            'student_count' => 30,
+            'status' => 'Allocated',
+        ]);
+    }
+
+    expect((new TimetableGenerator)->generate(
+        $department->id,
+        '5',
+        'A',
+        '2026-2027',
+        'Odd',
+        false
+    ))->toBeTrue();
+
+    $entries = TimetableEntry::query()
+        ->where('subject_id', $subject->id)
+        ->get()
+        ->keyBy('lecture_type');
+
+    expect($entries['Lecture']->faculty_id)->toBe($allocatedFaculty->id)
+        ->and($entries['Tutorial']->faculty_id)->toBe($allocatedFaculty->id)
+        ->and($entries['Lecture']->faculty_id)->not->toBe($subjectFaculty->id);
+});
+
+it('reports exact conflicts and preserves the prior timetable when no valid slot exists', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $faculty = Faculty::create([
+        'name' => 'Prof. Shah',
+        'email' => 'shah@example.com',
+        'designation' => 'Professor',
+        'department_id' => $department->id,
+    ]);
+    $room = Classroom::create([
+        'room_number' => 'A101',
+        'room_capacity' => 40,
+        'room_type' => 'Classroom',
+        'availability' => 'Available',
+    ]);
+    Division::create(['name' => 'A', 'semester' => '5', 'is_active' => true]);
+    $subject = Subject::create([
+        'name' => 'Advanced Data and Virtual Computing',
+        'subject_code' => 'ADDVC-501',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'faculty_id' => $faculty->id,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'tutorial_selections' => ['AT1'],
+    ]);
+    RoomAllocation::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'subject_id' => $subject->id,
+        'faculty_id' => $faculty->id,
+        'classroom_id' => $room->id,
+        'class_name' => 'A',
+        'division' => 'AT1',
+        'allocation_type' => 'Classroom',
+        'activity_type' => 'Tutorial',
+        'activity_batch' => 'AT1',
+        'student_count' => 30,
+        'status' => 'Allocated',
+    ]);
+
+    $existingTargetEntry = TimetableEntry::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'division' => 'A',
+        'academic_year' => '2026-2027',
+        'term' => 'Odd',
+        'day' => 'Monday',
+        'time_slot' => '10:30-11:30',
+        'subject_id' => $subject->id,
+        'faculty_id' => $faculty->id,
+        'classroom_id' => $room->id,
+        'lecture_type' => 'Tutorial',
+        'activity_batch' => 'AT1',
+        'duration' => 1,
+    ]);
+
+    foreach (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as $day) {
+        foreach ([
+            '10:30-11:30',
+            '11:30-12:30',
+            '01:00-02:00',
+            '02:00-03:00',
+            '03:10-04:10',
+            '04:10-05:10',
+        ] as $timeSlot) {
+            TimetableEntry::create([
+                'department_id' => $department->id,
+                'semester' => '5',
+                'division' => 'B',
+                'academic_year' => '2026-2027',
+                'term' => 'Odd',
+                'day' => $day,
+                'time_slot' => $timeSlot,
+                'subject_id' => $subject->id,
+                'faculty_id' => $faculty->id,
+                'classroom_id' => $room->id,
+                'lecture_type' => 'Lecture',
+                'duration' => 1,
+            ]);
+        }
+    }
+
+    $exception = null;
+    try {
+        (new TimetableGenerator)->generate($department->id, '5', 'A', '2026-2027', 'Odd', false);
+    } catch (Exception $caught) {
+        $exception = $caught;
+    }
+
+    expect($exception)->toBeInstanceOf(Exception::class)
+        ->and($exception->getMessage())->toContain('ADDVC-501')
+        ->toContain('AT1')
+        ->toContain('Prof. Shah')
+        ->toContain('A101')
+        ->toContain('Monday 10:30-11:30')
+        ->toContain('Faculty conflict with existing timetable')
+        ->toContain('Classroom conflict with existing timetable')
+        ->and(TimetableEntry::query()
+            ->where('department_id', $department->id)
+            ->where('semester', '5')
+            ->where('division', 'A')
+            ->where('academic_year', '2026-2027')
+            ->where('term', 'Odd')
+            ->count())->toBe(1)
+        ->and($existingTargetEntry->fresh()->time_slot)->toBe('10:30-11:30');
 });

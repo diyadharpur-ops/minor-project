@@ -11,6 +11,7 @@ use App\Models\RoomAllocation;
 use App\Models\Subject;
 use App\Models\TimetableEntry;
 use Exception;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class TimetableGenerator
@@ -39,6 +40,51 @@ class TimetableGenerator
         string $academicYear,
         string $term,
         bool $allocateFaculty = true
+    ): bool {
+        return DB::transaction(function () use (
+            $deptId,
+            $semester,
+            $division,
+            $academicYear,
+            $term,
+            $allocateFaculty
+        ): bool {
+            DB::table('faculties')
+                ->where('department_id', $deptId)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get(['id']);
+            DB::table('classrooms')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get(['id']);
+            DB::table('room_allocations')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get(['id']);
+            DB::table('timetable_entries')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get(['id']);
+
+            return $this->generateWithinTransaction(
+                $deptId,
+                $semester,
+                $division,
+                $academicYear,
+                $term,
+                $allocateFaculty
+            );
+        }, 3);
+    }
+
+    private function generateWithinTransaction(
+        int|string $deptId,
+        string $semester,
+        string $division,
+        string $academicYear,
+        string $term,
+        bool $allocateFaculty
     ): bool {
         $classrooms = Classroom::query()
             ->where('availability', 'Available')
@@ -93,91 +139,50 @@ class TimetableGenerator
 
         $allFaculty = Faculty::where('department_id', $deptId)->get();
 
-        $lectureRooms = $classrooms->filter(fn ($c) => stripos($c->room_type, 'lab') === false)->values();
-        $labRooms = $classrooms->filter(fn ($c) => stripos($c->room_type, 'lab') !== false)->values();
-        $roomIdByNumber = $classrooms->pluck('id', 'room_number');
-
-        $facultyOccupiedGlobal = [];
-        $roomOccupiedGlobal = [];
         $className = $department->name.'-'.$semester.'-'.$division;
 
-        // Build occupancy map for existing timetables (preventing cross-class conflicts)
         $existingEntries = TimetableEntry::whereNot(function ($q) use ($deptId, $semester, $division) {
             $q->where('department_id', $deptId)
                 ->where('semester', $semester)
                 ->where('division', $division);
-        })->get();
-
-        foreach ($existingEntries as $entry) {
-            $slotsToMark = [$entry->time_slot];
-            if ($entry->duration == 2) {
-                $idx = array_search($entry->time_slot, $this->timeSlots);
-                if ($idx !== false && isset($this->timeSlots[$idx + 1])) {
-                    $slotsToMark[] = $this->timeSlots[$idx + 1];
-                }
-            }
-
-            foreach ($slotsToMark as $s) {
-                if ($entry->faculty_id) {
-                    $facultyOccupiedGlobal[$entry->faculty_id][$entry->day][$s] = true;
-                }
-                if ($entry->classroom_id) {
-                    $roomOccupiedGlobal[$entry->classroom_id][$entry->day][$s] = true;
-                }
-                if ($entry->notes && str_starts_with($entry->notes, 'Room2:')) {
-                    $secondRoom = $roomIdByNumber->get(substr($entry->notes, 6));
-                    if ($secondRoom) {
-                        $roomOccupiedGlobal[$secondRoom][$entry->day][$s] = true;
-                    }
-                }
-            }
-        }
+        })->where('academic_year', $academicYear)
+            ->where('term', $term)
+            ->with(['subject', 'faculty', 'classroom'])
+            ->get();
 
         $scheduledAllocations = RoomAllocation::query()
             ->whereNotNull('day')
             ->whereNotNull('start_time')
             ->whereNotNull('end_time')
-            ->where(function ($query) use ($className): void {
-                $query->where('class_name', '!=', $className)
-                    ->orWhereNull('class_name');
+            ->where(function ($query) use ($academicYear): void {
+                $query->whereNull('academic_year')
+                    ->orWhere('academic_year', $academicYear);
             })
+            ->where(function ($query) use ($term): void {
+                $query->whereNull('term')
+                    ->orWhere('term', $term);
+            })
+            ->with(['subject', 'faculty', 'classroom', 'secondClassroom'])
             ->get();
-
-        foreach ($scheduledAllocations as $allocation) {
-            $allocationStart = $this->timeInMinutes((string) $allocation->start_time);
-            $allocationEnd = $this->timeInMinutes((string) $allocation->end_time);
-            if ($allocationStart === null || $allocationEnd === null) {
-                continue;
-            }
-
-            foreach ($this->timeSlots as $timeSlot) {
-                [$slotStart, $slotEnd] = explode('-', $timeSlot);
-                $slotStartTime = $this->timeInMinutes($slotStart);
-                $slotEndTime = $this->timeInMinutes($slotEnd);
-                if ($slotStartTime === null || $slotEndTime === null
-                    || $allocationStart >= $slotEndTime
-                    || $allocationEnd <= $slotStartTime) {
-                    continue;
-                }
-
-                if ($allocation->faculty_id) {
-                    $facultyOccupiedGlobal[$allocation->faculty_id][$allocation->day][$timeSlot] = true;
-                }
-
-                foreach ([$allocation->classroom_id, $allocation->second_classroom_id] as $roomId) {
-                    if ($roomId) {
-                        $roomOccupiedGlobal[$roomId][$allocation->day][$timeSlot] = true;
-                    }
-                }
-            }
-        }
 
         $roomAllocations = RoomAllocation::with(['faculty', 'classroom', 'secondClassroom'])
             ->where('department_id', $deptId)
             ->where('semester', $semester)
+            ->where(function ($query) use ($academicYear): void {
+                $query->whereNull('academic_year')
+                    ->orWhere('academic_year', $academicYear);
+            })
+            ->where(function ($query) use ($term): void {
+                $query->whereNull('term')
+                    ->orWhere('term', $term);
+            })
             ->where(function ($query) use ($className, $division): void {
                 $query->where('class_name', $className)
-                    ->orWhere('class_name', $division);
+                    ->orWhere('class_name', $division)
+                    ->orWhere(function ($batchQuery) use ($division): void {
+                        $batchQuery->where('division', 'like', $division.'%')
+                            ->orWhere('activity_batch', 'like', $division.'%');
+                    });
             })
             ->get();
 
@@ -213,13 +218,72 @@ class TimetableGenerator
             $findActivityAllocation,
             $findLegacyAllocation,
             $roomAllocations
-
         ): ?RoomAllocation {
             $allocationType = $type === 'Practical' ? 'Lab' : 'Classroom';
+            $allocationForBatch = function (string $selectedBatch) use (
+                $subject,
+                $type,
+                $allocationType,
+                $findActivityAllocation,
+                $roomAllocations
+            ): ?RoomAllocation {
+                $activityAllocation = $findActivityAllocation($subject, $type, $selectedBatch);
+                $legacyAllocation = $roomAllocations->first(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $subject->id
+                    && $allocation->activity_type === null
+                    && ($allocation->allocation_type === $allocationType || $allocation->allocation_type === null)
+                    && $allocation->division === $selectedBatch);
+
+                return $activityAllocation?->classroom_id
+                    ? $activityAllocation
+                    : ($legacyAllocation ?? $activityAllocation);
+            };
+
+            if ($type === 'Tutorial' && $batch !== null) {
+                $tutorialPair = $this->pairedTutorialBatches($batch);
+                $tutorialSelections = $subject->tutorial_selections ?? [];
+                if ($tutorialPair !== null
+                    && in_array($tutorialPair[0], $tutorialSelections, true)
+                    && in_array($tutorialPair[1], $tutorialSelections, true)) {
+                    $ownAllocation = $allocationForBatch($batch);
+                    $partnerBatch = $tutorialPair[0] === $batch ? $tutorialPair[1] : $tutorialPair[0];
+                    $partnerAllocation = $allocationForBatch($partnerBatch);
+
+                    if ($ownAllocation?->classroom_id) {
+                        return $ownAllocation;
+                    }
+
+                    if ($partnerAllocation?->classroom_id) {
+                        $sharedAllocation = $ownAllocation ? clone $ownAllocation : clone $partnerAllocation;
+                        if (! $ownAllocation) {
+                            $sharedAllocation->setAttribute('day', null);
+                            $sharedAllocation->setAttribute('start_time', null);
+                            $sharedAllocation->setAttribute('end_time', null);
+                        }
+                        $sharedAllocation->setAttribute('classroom_id', $partnerAllocation->classroom_id);
+                        $sharedAllocation->setRelation('classroom', $partnerAllocation->classroom);
+                        $sharedAllocation->setAttribute(
+                            'student_count',
+                            $ownAllocation?->student_count ?? $partnerAllocation->student_count
+                        );
+
+                        return $sharedAllocation;
+                    }
+
+                    if ($ownAllocation) {
+                        return $ownAllocation;
+                    }
+                }
+            }
+
             $batchCandidates = [$batch];
 
             if ($type === 'Practical' && $batch !== null) {
                 $pair = $this->pairedPracticalBatches($batch);
+                if ($pair !== null) {
+                    $batchCandidates = $pair;
+                }
+            } elseif ($type === 'Tutorial' && $batch !== null) {
+                $pair = $this->pairedTutorialBatches($batch);
                 if ($pair !== null) {
                     $batchCandidates = $pair;
                 }
@@ -272,8 +336,9 @@ class TimetableGenerator
             $allocation = $findActivityAllocation($subject, 'Lecture', null)
                 ?? $findLegacyAllocation($subject, 'Lecture');
 
-            return $subject->faculty
-                ?? $allocation?->faculty
+            return $allocation?->faculty
+                ?? $findLegacyAllocation($subject, 'Lecture')?->faculty
+                ?? $subject->faculty
                 ?? $allFaculty->first(fn (Faculty $faculty): bool => filled($subject->faculty_name)
                     && mb_stripos($faculty->name, (string) $subject->faculty_name) !== false);
         };
@@ -282,10 +347,6 @@ class TimetableGenerator
             $findLegacyAllocation,
             $allFaculty
         ): ?Faculty {
-            if (($type === 'Practical' && $batch === 'A1') || ($type === 'Tutorial' && $batch === 'AT1')) {
-                return $theoryFaculty;
-            }
-
             $allocation = $findActivityAllocation($subject, $type, $batch);
             if ($allocation) {
                 return $allocation->faculty;
@@ -305,7 +366,6 @@ class TimetableGenerator
 
         // Create Blocks
         $blocks = collect();
-        $totalHours = 0;
 
         foreach ($subjects as $subject) {
             $theoryFaculty = $getTheoryFaculty($subject);
@@ -331,7 +391,6 @@ class TimetableGenerator
                             'faculty' => $getActivityFaculty($subject, 'Practical', null, $theoryFaculty),
                             'allocation' => $findRoomAllocation($subject, 'Practical', null),
                         ]);
-                        $totalHours += 2;
                     }
                 } elseif (stripos($subject->subject_type ?? '', 'tutorial') !== false) {
                     for ($i = 0; $i < (int) $subject->credit; $i++) {
@@ -344,7 +403,6 @@ class TimetableGenerator
                             'allocation' => $findActivityAllocation($subject, 'Tutorial', null)
                                 ?? $findLegacyAllocation($subject, 'Tutorial'),
                         ]);
-                        $totalHours++;
                     }
                 } elseif (stripos($subject->subject_type ?? '', 'project') !== false) {
                     $projectType = stripos($subject->subject_type ?? '', 'minor') !== false ? 'Minor Project' : 'Project';
@@ -357,7 +415,6 @@ class TimetableGenerator
                             'faculty' => $getActivityFaculty($subject, $projectType, null, $theoryFaculty),
                             'allocation' => $findRoomAllocation($subject, $projectType, null),
                         ]);
-                        $totalHours++;
                     }
                 } else {
                     $lectureCount = (int) $subject->credit;
@@ -373,7 +430,6 @@ class TimetableGenerator
                     'faculty' => $theoryFaculty,
                     'allocation' => $findRoomAllocation($subject, 'Lecture', null),
                 ]);
-                $totalHours += 1;
             }
 
             foreach ($labBatches as $labBatch) {
@@ -386,7 +442,6 @@ class TimetableGenerator
                         'faculty' => $getActivityFaculty($subject, 'Practical', $labBatch, $theoryFaculty),
                         'allocation' => $findRoomAllocation($subject, 'Practical', $labBatch),
                     ]);
-                    $totalHours += 2;
                 }
             }
 
@@ -400,7 +455,6 @@ class TimetableGenerator
                         'faculty' => $getActivityFaculty($subject, 'Tutorial', $tutorialBatch, $theoryFaculty),
                         'allocation' => $findRoomAllocation($subject, 'Tutorial', $tutorialBatch),
                     ]);
-                    $totalHours++;
                 }
             }
         }
@@ -413,341 +467,46 @@ class TimetableGenerator
             );
         }
 
-        if ($totalHours > 36) {
-            throw new Exception("Error: The subjects require {$totalHours} weekly hours, but a 6-day schedule only supports 36 hours. Please reduce subject credits.");
+        foreach ($blocks as $index => $block) {
+            $block->id = $index;
         }
-
-        // Backtracking / Constraint Satisfaction Loop
-        $maxAttempts = 500;
-        $bestSchedule = [];
-        $bestPlacedCount = -1;
-        $failedBlock = null;
-
-        for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
-            // Track next available slot index per day to GUARANTEE top-to-bottom filling with zero gaps
-            $nextSlot = ['Monday' => 0, 'Tuesday' => 0, 'Wednesday' => 0, 'Thursday' => 0, 'Friday' => 0, 'Saturday' => 0];
-
-            $subjectOnDay = [];
-            $facultyOccupiedLocal = $facultyOccupiedGlobal;
-            $roomOccupiedLocal = $roomOccupiedGlobal;
-            $pairedPracticalRooms = [];
-
-            $localAssignments = [];
-            $placedAll = true;
-
-            // Important: Place 2-hour Practicals first so they don't get blocked by 1-hour gaps near breaks
-            $practicals = $blocks->where('type', 'Practical')->shuffle();
-            $theories = $blocks->whereIn('type', ['Lecture', 'Tutorial', 'Minor Project', 'Project'])->shuffle();
-            $orderedBlocks = $practicals->merge($theories);
-
-            foreach ($orderedBlocks as $block) {
-                $validPlacements = [];
-                $practicalPair = $block->type === 'Practical' && $block->batch !== null
-                    ? $this->pairedPracticalBatches($block->batch)
-                    : null;
-                $practicalPairKey = $practicalPair
-                    ? $block->subject->id.'|'.implode('|', $practicalPair)
-                    : null;
-                $pairedRoomId = $practicalPairKey
-                    ? ($pairedPracticalRooms[$practicalPairKey] ?? null)
-                    : null;
-
-                foreach ($this->days as $day) {
-                    $ns = $nextSlot[$day];
-
-                    // Capacity Check
-                    if ($ns + $block->duration > 6) {
-                        continue;
-                    }
-
-                    // Lab specific index alignment check (cannot span across breaks)
-                    // Valid Lab starts: 0 (10:30), 2 (01:00), 4 (03:10)
-                    if ($block->duration == 2 && ! in_array($ns, [0, 2, 4])) {
-                        continue;
-                    }
-
-                    // Rule 1 & 2 Check: Lecture/Tutorial & Lab of same subject MUST be on DIFFERENT days
-                    if (in_array($block->type, ['Lecture', 'Tutorial']) && ! empty($subjectOnDay[$block->subject->name][$day]['Practical'])) {
-                        continue;
-                    }
-                    if ($block->type == 'Practical' && (! empty($subjectOnDay[$block->subject->name][$day]['Lecture']) || ! empty($subjectOnDay[$block->subject->name][$day]['Tutorial']))) {
-                        continue;
-                    }
-
-                    $slots = [];
-                    for ($i = 0; $i < $block->duration; $i++) {
-                        $slots[] = $this->timeSlots[$ns + $i];
-                    }
-
-                    $facultyId = $block->faculty ? $block->faculty->id : null;
-
-                    // Check Faculty Conflict
-                    $facConflict = false;
-                    if ($facultyId) {
-                        foreach ($slots as $s) {
-                            if (! empty($facultyOccupiedLocal[$facultyId][$day][$s])) {
-                                $facConflict = true;
-                                break;
-                            }
-                        }
-                    }
-                    if ($facConflict) {
-                        continue;
-                    }
-
-                    // Find Available Room
-                    $availableRoomId = null;
-                    $availableSecondRoomId = null;
-                    $secondRoomNotes = null;
-
-                    // Check if there is a pre-allocated room
-                    $alloc = $block->allocation;
-                    $hasExplicitAllocation = $alloc !== null;
-                    if (! $alloc) {
-                        $allocationType = $block->type === 'Practical' ? 'Lab' : 'Classroom';
-                        $alloc = $roomAllocations->first(fn (RoomAllocation $candidate): bool => $candidate->subject_id === $block->subject->id
-                            && $candidate->activity_type === null
-                            && $candidate->allocation_type === $allocationType
-                            && $candidate->division === $block->batch
-                            && $candidate->classroom_id !== null);
-                        if (! $alloc && $block->batch === null) {
-                            $alloc = $roomAllocations->first(fn (RoomAllocation $candidate): bool => $candidate->subject_id === $block->subject->id
-                                && $candidate->activity_type === null
-                                && $candidate->allocation_type === $allocationType
-                                && $candidate->classroom_id !== null);
-                        }
-                        $hasExplicitAllocation = $hasExplicitAllocation || $alloc !== null;
-                    }
-                    if ($alloc && $alloc->classroom_id) {
-                        $allocatedRoom = $alloc->classroom;
-                        $roomTypeIsSuitable = $allocatedRoom
-                            && ($block->type === 'Practical'
-                                ? str_contains(strtolower((string) $allocatedRoom->room_type), 'lab')
-                                : ! str_contains(strtolower((string) $allocatedRoom->room_type), 'lab'));
-                        $roomHasCapacity = $allocatedRoom
-                            && (int) $allocatedRoom->room_capacity >= (int) ($alloc->student_count ?? 0);
-                        $roomIsAvailable = $allocatedRoom?->availability === 'Available';
-                        $allocatedSecondRoom = $alloc->secondClassroom;
-                        $secondRoomIsSuitable = ! $alloc->second_classroom_id
-                            || ($allocatedSecondRoom
-                                && $allocatedSecondRoom->availability === 'Available'
-                                && str_contains(strtolower((string) $allocatedSecondRoom->room_type), 'lab')
-                                && (int) $allocatedSecondRoom->room_capacity >= (int) ($alloc->student_count ?? 0));
-                        $roomConflict = false;
-                        foreach ($slots as $s) {
-                            if (! empty($roomOccupiedLocal[$alloc->classroom_id][$day][$s])) {
-                                $roomConflict = true;
-                                break;
-                            }
-                            if ($alloc->second_classroom_id && ! empty($roomOccupiedLocal[$alloc->second_classroom_id][$day][$s])) {
-                                $roomConflict = true;
-                                break;
-                            }
-                        }
-                        if (! $roomConflict && $roomTypeIsSuitable && $roomHasCapacity && $roomIsAvailable && $secondRoomIsSuitable) {
-                            $availableRoomId = $alloc->classroom_id;
-                            if ($allocatedSecondRoom) {
-                                $availableSecondRoomId = $alloc->second_classroom_id;
-                                $secondRoomNotes = 'Room2:'.$allocatedSecondRoom->room_number;
-                            }
-                        }
-                    }
-
-                    if ($pairedRoomId !== null) {
-                        $pairedRoom = $classrooms->firstWhere('id', $pairedRoomId);
-                        $pairedRoomIsAvailable = $pairedRoom
-                            && str_contains(strtolower((string) $pairedRoom->room_type), 'lab')
-                            && (int) $pairedRoom->room_capacity >= (int) ($alloc?->student_count ?? 0);
-                        $pairedRoomConflict = false;
-                        foreach ($slots as $s) {
-                            if (! empty($roomOccupiedLocal[$pairedRoomId][$day][$s])) {
-                                $pairedRoomConflict = true;
-                                break;
-                            }
-                        }
-
-                        $availableRoomId = $pairedRoomIsAvailable && ! $pairedRoomConflict
-                            ? $pairedRoomId
-                            : null;
-                        $availableSecondRoomId = null;
-                        $secondRoomNotes = null;
-                    }
-
-                    if (! $availableRoomId && ! $hasExplicitAllocation && $pairedRoomId === null) {
-                        $roomsList = ($block->type == 'Practical') ? $labRooms : $lectureRooms;
-                        foreach ($roomsList->shuffle() as $room) {
-                            $roomConflict = false;
-                            foreach ($slots as $s) {
-                                if (! empty($roomOccupiedLocal[$room->id][$day][$s])) {
-                                    $roomConflict = true;
-                                    break;
-                                }
-                            }
-                            if (! $roomConflict) {
-                                $availableRoomId = $room->id;
-                                break;
-                            }
-                        }
-                        if (! $availableRoomId) {
-                            continue;
-                        }
-                    }
-                    if ($pairedRoomId !== null && ! $availableRoomId) {
-                        continue;
-                    }
-                    if ($hasExplicitAllocation && ! $availableRoomId) {
-                        continue;
-                    }
-
-                    // Calculate Penalty to pick the most balanced day
-                    $penalty = rand(0, 5); // Add stochasticity to enable backtracking exploration
-
-                    $penalty += $ns * 10; // Favor emptier days
-
-                    // Heavy penalty to avoid repeating same subject multiple times on same day
-                    if (! empty($subjectOnDay[$block->subject->name][$day])) {
-                        $penalty += 500;
-                    }
-
-                    // Rule 8: Balance evenly, avoid consecutive days if possible
-                    $dayIdx = array_search($day, $this->days);
-                    if ($dayIdx > 0 && ! empty($subjectOnDay[$block->subject->name][$this->days[$dayIdx - 1]])) {
-                        $penalty += 50;
-                    }
-                    if ($dayIdx < 5 && ! empty($subjectOnDay[$block->subject->name][$this->days[$dayIdx + 1]])) {
-                        $penalty += 50;
-                    }
-
-                    $validPlacements[] = [
-                        'day' => $day,
-                        'ns' => $ns,
-                        'slots' => $slots,
-                        'room_id' => $availableRoomId,
-                        'second_room_id' => $availableSecondRoomId,
-                        'notes' => $secondRoomNotes,
-                        'penalty' => $penalty,
-                    ];
-                }
-
-                if (empty($validPlacements)) {
-                    $placedAll = false;
-                    $failedBlock = $block;
-                    break; // Move to next attempt if this attempt hit a dead-end
-                }
-
-                // Sort by penalty and pick the best placement
-                usort($validPlacements, fn ($a, $b) => $a['penalty'] <=> $b['penalty']);
-                $best = $validPlacements[0];
-
-                $day = $best['day'];
-                $slots = $best['slots'];
-                $roomId = $best['room_id'];
-                $secondRoomId = $best['second_room_id'];
-                $notes = $best['notes'];
-                $facultyId = $block->faculty ? $block->faculty->id : null;
-
-                if ($practicalPairKey && $roomId !== null) {
-                    $pairedPracticalRooms[$practicalPairKey] = $roomId;
-                }
-
-                $localAssignments[] = [
-                    'department_id' => $deptId,
-                    'semester' => $semester,
-                    'division' => $division,
-                    'academic_year' => $academicYear,
-                    'term' => $term,
-                    'day' => $day,
-                    'time_slot' => $slots[0],
-                    'subject_id' => $block->subject->id,
-                    'faculty_id' => $facultyId,
-                    'classroom_id' => $roomId,
-                    'lecture_type' => $block->type,
-                    'activity_batch' => $block->batch,
-                    'duration' => $block->duration,
-                    'notes' => $notes,
-                ];
-
-                // Update constraints
-                $nextSlot[$day] += $block->duration;
-                $subjectOnDay[$block->subject->name][$day][$block->type] = true;
-
-                if ($facultyId) {
-                    foreach ($slots as $s) {
-                        $facultyOccupiedLocal[$facultyId][$day][$s] = true;
-                    }
-                }
-                if ($roomId) {
-                    foreach ($slots as $s) {
-                        $roomOccupiedLocal[$roomId][$day][$s] = true;
-                    }
-                }
-                if ($secondRoomId) {
-                    foreach ($slots as $s) {
-                        $roomOccupiedLocal[$secondRoomId][$day][$s] = true;
-                    }
-                }
-            }
-
-            // Keep track of the best schedule we found
-            if (count($localAssignments) > $bestPlacedCount) {
-                $bestPlacedCount = count($localAssignments);
-                $bestSchedule = $localAssignments;
-            }
-
-            // If we successfully placed ALL blocks, we are done!
-            if ($placedAll && count($localAssignments) == $blocks->count()) {
-                break;
-            }
-        }
-
-        $scheduledCounts = collect($bestSchedule)
-            ->countBy(fn (array $assignment): string => $assignment['subject_id'].'|'.$assignment['lecture_type'].'|'.($assignment['activity_batch'] ?? ''))
+        $blockAllocationIds = $blocks
+            ->pluck('allocation')
+            ->filter()
+            ->pluck('id')
+            ->map(fn (int|string $id): int => (int) $id)
+            ->unique()
+            ->values()
             ->all();
-        $missingBlocks = collect();
-        foreach ($blocks as $block) {
-            $key = $block->subject->id.'|'.$block->type.'|'.($block->batch ?? '');
-            if (($scheduledCounts[$key] ?? 0) > 0) {
-                $scheduledCounts[$key]--;
-            } else {
-                $missingBlocks->push($block);
-            }
-        }
-        $failedBlock = $missingBlocks->first(
-            fn ($block): bool => ($block->type === 'Practical' && $block->batch === 'A1')
-                || ($block->type === 'Tutorial' && $block->batch === 'AT1')
-        ) ?? $missingBlocks->first() ?? $failedBlock;
-
-        if ($bestPlacedCount < $blocks->count()) {
-            $missing = $missingBlocks->count();
-            $blockLabel = $failedBlock
-                ? "{$failedBlock->type}".($failedBlock->batch ? " {$failedBlock->batch}" : '')." for {$failedBlock->subject->name}"
-                : 'one or more sessions';
-            $mandatoryNotice = $failedBlock
-                && (($failedBlock->type === 'Practical' && $failedBlock->batch === 'A1')
-                    || ($failedBlock->type === 'Tutorial' && $failedBlock->batch === 'AT1'))
-                ? ' The mandatory theory faculty remains assigned; resolve their timetable conflict rather than replacing them.'
-                : '';
-
-            throw new Exception(
-                "Could not schedule {$blockLabel}; {$missing} of {$blocks->count()} sessions could not be placed because of faculty or room conflicts.{$mandatoryNotice}"
-            );
+        $result = $this->findConflictFreeSchedule(
+            $blocks->values()->all(),
+            $classrooms,
+            $existingEntries,
+            $scheduledAllocations,
+            $blockAllocationIds,
+            $deptId,
+            $semester,
+            $division,
+            $academicYear,
+            $term,
+            $className
+        );
+        if ($result['schedule'] === null) {
+            throw new Exception($result['error'] ?? 'Timetable generation failed without a conflict report.');
         }
 
-        DB::transaction(function () use ($deptId, $semester, $division, $academicYear, $term, $bestSchedule) {
-            // Delete existing entries for this class before saving new ones
-            TimetableEntry::where([
+        TimetableEntry::query()
+            ->where([
                 'department_id' => $deptId,
                 'semester' => $semester,
                 'division' => $division,
                 'academic_year' => $academicYear,
                 'term' => $term,
-            ])->delete();
-
-            // Save the best timetable we found
-            foreach ($bestSchedule as $a) {
-                TimetableEntry::create($a);
-            }
-        });
+            ])
+            ->delete();
+        foreach ($result['schedule'] as $assignment) {
+            TimetableEntry::create($assignment);
+        }
 
         Notification::trigger('Timetable Generated', [
             'department_name' => $department->name,
@@ -756,6 +515,652 @@ class TimetableGenerator
         ]);
 
         return true;
+    }
+
+    /**
+     * @param  array<int, object>  $blocks
+     * @param  array<int, int|string>  $blockAllocationIds
+     * @return array{schedule: array<int, array<string, mixed>>|null, error: string|null}
+     */
+    private function findConflictFreeSchedule(
+        array $blocks,
+        Collection $classrooms,
+        Collection $existingEntries,
+        Collection $scheduledAllocations,
+        array $blockAllocationIds,
+        int|string $deptId,
+        string $semester,
+        string $division,
+        string $academicYear,
+        string $term,
+        string $className
+    ): array {
+        $roomIdByNumber = Classroom::query()->pluck('id', 'room_number');
+        $state = [
+            'faculty' => [],
+            'rooms' => [],
+            'division' => [],
+            'batches' => [],
+            'subject_day' => [],
+            'assignments' => [],
+        ];
+        $addOccupant = static function (array &$occupancy, int|string $resourceId, string $day, string $slot, string $label): void {
+            $occupancy[$resourceId][$day][$slot][] = $label;
+        };
+        $addTargetClassOccupant = static function (array &$state, ?string $batch, string $day, string $slot, string $label) use ($division): void {
+            if ($batch === null || $batch === '' || $batch === $division || ! str_starts_with($batch, $division)) {
+                $state['division'][$day][$slot][] = $label;
+
+                return;
+            }
+
+            $state['batches'][$batch][$day][$slot][] = $label;
+        };
+
+        foreach ($existingEntries as $entry) {
+            $slotIndex = array_search($entry->time_slot, $this->timeSlots, true);
+            if ($slotIndex === false) {
+                continue;
+            }
+
+            $label = $this->sessionDescription(
+                $entry->subject?->name,
+                $entry->subject?->subject_code,
+                $entry->lecture_type,
+                $entry->activity_batch,
+                $entry->faculty?->name,
+                $entry->classroom?->room_number,
+                'existing timetable'
+            )." on {$entry->day} at {$entry->time_slot}";
+            $slots = [$entry->time_slot];
+            if ((int) $entry->duration === 2 && isset($this->timeSlots[$slotIndex + 1])) {
+                $slots[] = $this->timeSlots[$slotIndex + 1];
+            }
+
+            foreach ($slots as $slot) {
+                if ($entry->faculty_id) {
+                    $addOccupant($state['faculty'], $entry->faculty_id, $entry->day, $slot, $label);
+                }
+                if ($entry->classroom_id) {
+                    $addOccupant($state['rooms'], $entry->classroom_id, $entry->day, $slot, $label);
+                }
+                if ($entry->notes && str_starts_with($entry->notes, 'Room2:')) {
+                    $secondRoomId = $roomIdByNumber->get(substr($entry->notes, 6));
+                    if ($secondRoomId) {
+                        $addOccupant($state['rooms'], $secondRoomId, $entry->day, $slot, $label);
+                    }
+                }
+            }
+        }
+
+        foreach ($scheduledAllocations as $allocation) {
+            if (in_array($allocation->id, $blockAllocationIds, true)) {
+                continue;
+            }
+
+            $allocationStart = $this->timeInMinutes((string) $allocation->start_time);
+            $allocationEnd = $this->timeInMinutes((string) $allocation->end_time);
+            if ($allocationStart === null || $allocationEnd === null || $allocationStart >= $allocationEnd) {
+                continue;
+            }
+
+            $label = $this->sessionDescription(
+                $allocation->subject?->name,
+                $allocation->subject?->subject_code,
+                $allocation->activity_type ?? $allocation->allocation_type,
+                $allocation->activity_batch ?? $allocation->division,
+                $allocation->faculty?->name,
+                $allocation->classroom?->room_number,
+                'fixed room allocation'
+            )." on {$allocation->day} from {$allocation->start_time} to {$allocation->end_time}";
+            $isTargetClass = (string) $allocation->department_id === (string) $deptId
+                && (string) $allocation->semester === $semester
+                && in_array($allocation->class_name, [$division, $className], true);
+
+            foreach ($this->timeSlots as $slot) {
+                [$slotStart, $slotEnd] = explode('-', $slot);
+                $slotStartMinute = $this->timeInMinutes($slotStart);
+                $slotEndMinute = $this->timeInMinutes($slotEnd);
+                if ($slotStartMinute === null || $slotEndMinute === null
+                    || $allocationStart >= $slotEndMinute
+                    || $allocationEnd <= $slotStartMinute) {
+                    continue;
+                }
+
+                if ($allocation->faculty_id) {
+                    $addOccupant($state['faculty'], $allocation->faculty_id, $allocation->day, $slot, $label);
+                }
+                foreach ([$allocation->classroom_id, $allocation->second_classroom_id] as $roomId) {
+                    if ($roomId) {
+                        $addOccupant($state['rooms'], $roomId, $allocation->day, $slot, $label);
+                    }
+                }
+                if ($isTargetClass) {
+                    $batch = $allocation->activity_batch ?: $allocation->division;
+                    $addTargetClassOccupant($state, $batch, $allocation->day, $slot, $label);
+                }
+            }
+        }
+
+        $roomOptions = [];
+        $roomErrors = [];
+        $fixedTimes = [];
+        foreach ($blocks as $block) {
+            [$roomOptions[$block->id], $roomErrors[$block->id]] = $this->roomOptionsForBlock($block, $classrooms);
+            $fixedTimes[$block->id] = $this->fixedTimeForBlock($block);
+        }
+
+        $bestAssignments = [];
+        $bestState = $state;
+        $failureReasons = [];
+        $recordFailure = static function (int $blockId, array $issues) use (&$failureReasons): void {
+            foreach ($issues as $day => $slots) {
+                foreach ($slots as $slot => $reasons) {
+                    foreach ($reasons as $reason) {
+                        $failureReasons[$blockId][$day][$slot][$reason] = $reason;
+                    }
+                }
+            }
+        };
+
+        $search = function (array $remaining, array $currentState) use (
+            &$search,
+            &$bestAssignments,
+            &$bestState,
+            $recordFailure,
+            $roomOptions,
+            $roomErrors,
+            $fixedTimes,
+            $division,
+            $deptId,
+            $semester
+        ): ?array {
+            if (count($currentState['assignments']) > count($bestAssignments)) {
+                $bestAssignments = $currentState['assignments'];
+                $bestState = $currentState;
+            }
+            if ($remaining === []) {
+                return $currentState['assignments'];
+            }
+
+            $selectedBlock = null;
+            $selectedPlacements = [];
+            $fewestPlacements = PHP_INT_MAX;
+            foreach ($remaining as $block) {
+                [$placements, $issues] = $this->placementsForBlock(
+                    $block,
+                    $currentState,
+                    $roomOptions[$block->id],
+                    $roomErrors[$block->id],
+                    $fixedTimes[$block->id],
+                    $division
+                );
+                if ($placements === []) {
+                    $recordFailure($block->id, $issues);
+                }
+                if (count($placements) < $fewestPlacements) {
+                    $selectedBlock = $block;
+                    $selectedPlacements = $placements;
+                    $fewestPlacements = count($placements);
+                }
+                if ($fewestPlacements === 0) {
+                    break;
+                }
+            }
+
+            if ($selectedBlock === null || $selectedPlacements === []) {
+                return null;
+            }
+
+            usort($selectedPlacements, static function (array $left, array $right): int {
+                return [$left['penalty'], $left['room_id'], $left['day'], $left['start_index']]
+                    <=> [$right['penalty'], $right['room_id'], $right['day'], $right['start_index']];
+            });
+
+            foreach ($selectedPlacements as $placement) {
+                $nextState = $currentState;
+                $block = $selectedBlock;
+                $facultyId = $block->faculty->id;
+                $label = $this->sessionDescription(
+                    $block->subject->name,
+                    $block->subject->subject_code,
+                    $block->type,
+                    $block->batch,
+                    $block->faculty->name,
+                    $placement['room_number'],
+                    'scheduled session'
+                )." on {$placement['day']} at {$placement['slots'][0]}";
+                $entry = [
+                    'department_id' => $deptId,
+                    'semester' => $semester,
+                    'division' => $division,
+                    'academic_year' => $block->academic_year,
+                    'term' => $block->term,
+                    'day' => $placement['day'],
+                    'time_slot' => $placement['slots'][0],
+                    'subject_id' => $block->subject->id,
+                    'faculty_id' => $facultyId,
+                    'classroom_id' => $placement['room_id'],
+                    'lecture_type' => $block->type,
+                    'activity_batch' => $block->batch,
+                    'duration' => $block->duration,
+                    'notes' => $placement['notes'],
+                ];
+                $nextState['assignments'][$block->id] = $entry;
+                foreach ($placement['slots'] as $slot) {
+                    $nextState['faculty'][$facultyId][$placement['day']][$slot][] = $label;
+                    $nextState['rooms'][$placement['room_id']][$placement['day']][$slot][] = $label;
+                    if ($placement['second_room_id']) {
+                        $nextState['rooms'][$placement['second_room_id']][$placement['day']][$slot][] = $label;
+                    }
+                    if ($block->batch === null) {
+                        $nextState['division'][$placement['day']][$slot][] = $label;
+                    } else {
+                        $nextState['batches'][$block->batch][$placement['day']][$slot][] = $label;
+                    }
+                }
+                $nextState['subject_day'][$block->subject->id][$placement['day']][$block->type] = $label;
+
+                $nextRemaining = array_values(array_filter(
+                    $remaining,
+                    fn (object $remainingBlock): bool => $remainingBlock->id !== $block->id
+                ));
+                $result = $search($nextRemaining, $nextState);
+                if ($result !== null) {
+                    return $result;
+                }
+            }
+
+            return null;
+        };
+
+        foreach ($blocks as $index => $block) {
+            $block->id = $index;
+            $block->academic_year = $academicYear;
+            $block->term = $term;
+        }
+
+        $schedule = $search($blocks, $state);
+        if ($schedule !== null) {
+            return [
+                'schedule' => array_values($schedule),
+                'error' => null,
+            ];
+        }
+
+        $missingBlocks = array_values(array_filter(
+            $blocks,
+            fn (object $block): bool => ! isset($bestAssignments[$block->id])
+        ));
+        $error = $this->formatSchedulingFailure(
+            $missingBlocks,
+            $failureReasons,
+            $bestState,
+            $roomOptions,
+            $roomErrors,
+            $fixedTimes,
+            $division
+        );
+
+        return [
+            'schedule' => null,
+            'error' => $error,
+        ];
+    }
+
+    /**
+     * @return array{0: array<int, array{room_id: int, second_room_id: int|null, room_number: string, notes: string|null}>, 1: array<int, string>}
+     */
+    private function roomOptionsForBlock(object $block, Collection $classrooms): array
+    {
+        $allocation = $block->allocation;
+        $isLab = $block->type === 'Practical';
+        $capacity = (int) ($allocation?->student_count ?? 0);
+
+        if ($allocation && ! $allocation->classroom_id) {
+            $options = $classrooms
+                ->filter(fn (Classroom $room): bool => ($isLab
+                    ? str_contains(strtolower((string) $room->room_type), 'lab')
+                    : ! str_contains(strtolower((string) $room->room_type), 'lab'))
+                    && (int) $room->room_capacity >= $capacity)
+                ->map(fn (Classroom $room): array => [
+                    'room_id' => (int) $room->id,
+                    'second_room_id' => null,
+                    'room_number' => (string) $room->room_number,
+                    'notes' => null,
+                ])
+                ->values()
+                ->all();
+
+            return [$options, $options === [] ? ['No available classroom of the required room type and capacity exists.'] : []];
+        }
+
+        if ($allocation) {
+            $room = $allocation->classroom;
+            if (! $room) {
+                return [[], ['The configured classroom no longer exists.']];
+            }
+            if ($room->availability !== 'Available') {
+                return [[], ["Required classroom {$room->room_number} is not available."]];
+            }
+            if (($isLab && ! str_contains(strtolower((string) $room->room_type), 'lab'))
+                || (! $isLab && str_contains(strtolower((string) $room->room_type), 'lab'))) {
+                return [[], ["Required classroom {$room->room_number} has the wrong room type."]];
+            }
+            if ((int) $room->room_capacity < $capacity) {
+                return [[], ["Required classroom {$room->room_number} capacity ({$room->room_capacity}) is below the allocation size ({$capacity})."]];
+            }
+
+            $secondRoom = $allocation->secondClassroom;
+            if ($allocation->second_classroom_id
+                && (! $secondRoom
+                    || $secondRoom->availability !== 'Available'
+                    || ! str_contains(strtolower((string) $secondRoom->room_type), 'lab')
+                    || (int) $secondRoom->room_capacity < $capacity)) {
+                return [[], ['The configured second laboratory is unavailable or unsuitable.']];
+            }
+
+            return [[[
+                'room_id' => (int) $room->id,
+                'second_room_id' => $secondRoom ? (int) $secondRoom->id : null,
+                'room_number' => (string) $room->room_number,
+                'notes' => $secondRoom ? 'Room2:'.$secondRoom->room_number : null,
+            ]], []];
+        }
+
+        $options = $classrooms
+            ->filter(fn (Classroom $room): bool => $isLab
+                ? str_contains(strtolower((string) $room->room_type), 'lab')
+                : ! str_contains(strtolower((string) $room->room_type), 'lab'))
+            ->map(fn (Classroom $room): array => [
+                'room_id' => (int) $room->id,
+                'second_room_id' => null,
+                'room_number' => (string) $room->room_number,
+                'notes' => null,
+            ])
+            ->values()
+            ->all();
+
+        return [$options, $options === [] ? ['No available classroom of the required room type exists.'] : []];
+    }
+
+    /**
+     * @return array{day: string|null, start_index: int|null, error: string|null}|null
+     */
+    private function fixedTimeForBlock(object $block): ?array
+    {
+        $allocation = $block->allocation;
+        if (! $allocation || (! filled($allocation->start_time) && ! filled($allocation->end_time))) {
+            return null;
+        }
+
+        $day = (string) $allocation->day;
+        $startMinute = $this->timeInMinutes((string) $allocation->start_time);
+        $endMinute = $this->timeInMinutes((string) $allocation->end_time);
+        if (! in_array($day, $this->days, true) || $startMinute === null || $endMinute === null) {
+            return [
+                'day' => null,
+                'start_index' => null,
+                'error' => 'The configured fixed day or time is invalid.',
+            ];
+        }
+
+        $startIndex = null;
+        foreach ($this->timeSlots as $index => $slot) {
+            [$start] = explode('-', $slot);
+            if ($this->timeInMinutes($start) === $startMinute) {
+                $startIndex = $index;
+                break;
+            }
+        }
+
+        if ($startIndex === null || $startIndex + $block->duration > count($this->timeSlots)) {
+            return [
+                'day' => $day,
+                'start_index' => null,
+                'error' => 'The configured fixed time does not start in a valid timetable slot.',
+            ];
+        }
+
+        if ($block->duration === 2 && ! in_array($startIndex, [0, 2, 4], true)) {
+            return [
+                'day' => $day,
+                'start_index' => $startIndex,
+                'error' => 'The configured two-hour session overlaps a recess period.',
+            ];
+        }
+
+        [, $lastSlotEnd] = explode('-', $this->timeSlots[$startIndex + $block->duration - 1]);
+        if ($this->timeInMinutes($lastSlotEnd) !== $endMinute) {
+            return [
+                'day' => $day,
+                'start_index' => $startIndex,
+                'error' => 'The configured fixed time does not match the required session duration.',
+            ];
+        }
+
+        return [
+            'day' => $day,
+            'start_index' => $startIndex,
+            'error' => null,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $state
+     * @param  array<int, array{room_id: int, second_room_id: int|null, room_number: string, notes: string|null}>  $roomOptions
+     * @param  array<int, string>  $roomErrors
+     * @param  array{day: string|null, start_index: int|null, error: string|null}|null  $fixedTime
+     * @return array{0: array<int, array<string, mixed>>, 1: array<string, array<string, array<int, string>>>}
+     */
+    private function placementsForBlock(
+        object $block,
+        array $state,
+        array $roomOptions,
+        array $roomErrors,
+        ?array $fixedTime,
+        string $division
+    ): array {
+        $placements = [];
+        $issues = [];
+        $startIndices = range(0, 6 - $block->duration);
+        foreach ($this->days as $day) {
+            foreach ($startIndices as $startIndex) {
+                $startSlot = $this->timeSlots[$startIndex];
+                $candidateLabel = $block->duration === 2
+                    ? $startSlot.' + '.$this->timeSlots[$startIndex + 1]
+                    : $startSlot;
+                $slots = [];
+                for ($offset = 0; $offset < $block->duration; $offset++) {
+                    $slots[] = $this->timeSlots[$startIndex + $offset];
+                }
+
+                if ($block->duration === 2 && ! in_array($startIndex, [0, 2, 4], true)) {
+                    $issues[$day][$candidateLabel][] = 'The two-hour practical would cross a recess period.';
+
+                    continue;
+                }
+
+                $fixedTimeReasons = [];
+                if ($fixedTime !== null) {
+                    if ($fixedTime['error'] !== null) {
+                        $fixedTimeReasons[] = $fixedTime['error'];
+                    } elseif ($fixedTime['day'] !== $day || $fixedTime['start_index'] !== $startIndex) {
+                        $fixedTimeReasons[] = "The allocation is fixed to {$fixedTime['day']} at {$this->timeSlots[$fixedTime['start_index']]}";
+                    }
+                }
+
+                $roomPlacementFound = false;
+                $rejectedReasons = $fixedTimeReasons;
+                if ($roomOptions === []) {
+                    $rejectedReasons = [...$rejectedReasons, ...$roomErrors];
+                }
+
+                foreach ($roomOptions as $roomOption) {
+                    $reasons = $fixedTimeReasons;
+                    $facultyId = $block->faculty->id;
+                    foreach ($slots as $slot) {
+                        foreach ($state['faculty'][$facultyId][$day][$slot] ?? [] as $occupant) {
+                            $reasons[] = "Faculty conflict with {$occupant}.";
+                        }
+
+                        foreach ([$roomOption['room_id'], $roomOption['second_room_id']] as $roomId) {
+                            if (! $roomId) {
+                                continue;
+                            }
+                            foreach ($state['rooms'][$roomId][$day][$slot] ?? [] as $occupant) {
+                                $reasons[] = "Classroom conflict with {$occupant}.";
+                            }
+                        }
+
+                        foreach ($state['division'][$day][$slot] ?? [] as $occupant) {
+                            $reasons[] = "Division conflict with {$occupant}.";
+                        }
+                        if ($block->batch === null) {
+                            foreach ($state['batches'] as $batchOccupancy) {
+                                foreach ($batchOccupancy[$day][$slot] ?? [] as $occupant) {
+                                    $reasons[] = "Division conflict with {$occupant}.";
+                                }
+                            }
+                        } else {
+                            foreach ($state['batches'][$block->batch][$day][$slot] ?? [] as $occupant) {
+                                $reasons[] = "Batch conflict with {$occupant}.";
+                            }
+                        }
+                    }
+
+                    $subjectDay = $state['subject_day'][$block->subject->id][$day] ?? [];
+                    if (in_array($block->type, ['Lecture', 'Tutorial'], true)
+                        && isset($subjectDay['Practical'])) {
+                        $reasons[] = "Subject/day rule conflict with {$subjectDay['Practical']}.";
+                    }
+                    if ($block->type === 'Practical') {
+                        foreach (['Lecture', 'Tutorial'] as $otherType) {
+                            if (isset($subjectDay[$otherType])) {
+                                $reasons[] = "Subject/day rule conflict with {$subjectDay[$otherType]}.";
+                            }
+                        }
+                    }
+
+                    $reasons = array_values(array_unique($reasons));
+                    if ($reasons !== []) {
+                        $rejectedReasons = [...$rejectedReasons, ...$reasons];
+
+                        continue;
+                    }
+
+                    $roomPlacementFound = true;
+                    $dayLoad = count($state['division'][$day] ?? []);
+                    foreach ($state['batches'] as $batchOccupancy) {
+                        $dayLoad += count($batchOccupancy[$day] ?? []);
+                    }
+                    $placements[] = [
+                        ...$roomOption,
+                        'day' => $day,
+                        'start_index' => $startIndex,
+                        'slots' => $slots,
+                        'penalty' => ($dayLoad * 20)
+                            + ($startIndex * 2)
+                            + (isset($subjectDay[$block->type]) ? 100 : 0),
+                    ];
+                }
+
+                if (! $roomPlacementFound) {
+                    $issues[$day][$candidateLabel] = array_values(array_unique(
+                        $rejectedReasons !== [] ? $rejectedReasons : ['No valid classroom allocation is available.']
+                    ));
+                }
+            }
+        }
+
+        return [$placements, $issues];
+    }
+
+    /**
+     * @param  array<int, object>  $missingBlocks
+     * @param  array<int, array<string, array<string, array<string, string>>>>  $failureReasons
+     * @param  array<string, mixed>  $state
+     * @param  array<int, array<int, array{room_id: int, second_room_id: int|null, room_number: string, notes: string|null}>>  $roomOptions
+     * @param  array<int, array<int, string>>  $roomErrors
+     * @param  array<int, array{day: string|null, start_index: int|null, error: string|null}|null>  $fixedTimes
+     */
+    private function formatSchedulingFailure(
+        array $missingBlocks,
+        array $failureReasons,
+        array $state,
+        array $roomOptions,
+        array $roomErrors,
+        array $fixedTimes,
+        string $division
+    ): string {
+        $message = 'Timetable generation was rolled back because all required sessions could not be scheduled.';
+        $message .= "\nUnscheduled sessions and rejected candidate slots:";
+
+        foreach ($missingBlocks as $block) {
+            $facultyName = (string) ($block->faculty?->name ?? 'Unassigned');
+            $roomRequirement = $block->allocation?->classroom?->room_number
+                ?? ($roomOptions[$block->id] !== []
+                    ? 'Available room(s): '.implode(', ', array_column($roomOptions[$block->id], 'room_number'))
+                    : 'No valid room assignment');
+            $message .= "\n\n{$block->subject->name} ({$block->subject->subject_code}) — {$block->type}"
+                .($block->batch ? " {$block->batch}" : '')
+                ."; faculty: {$facultyName}; required classroom: {$roomRequirement}.";
+            $message .= "\nCandidate days/time slots checked:";
+
+            [, $currentIssues] = $this->placementsForBlock(
+                $block,
+                $state,
+                $roomOptions[$block->id],
+                $roomErrors[$block->id],
+                $fixedTimes[$block->id],
+                $division
+            );
+            $issues = $failureReasons[$block->id] ?? [];
+            foreach ($currentIssues as $day => $slots) {
+                foreach ($slots as $slot => $reasons) {
+                    foreach ($reasons as $reason) {
+                        $issues[$day][$slot][$reason] = $reason;
+                    }
+                }
+            }
+
+            foreach ($this->days as $day) {
+                foreach (range(0, 6 - $block->duration) as $startIndex) {
+                    $slot = $block->duration === 2
+                        ? $this->timeSlots[$startIndex].' + '.$this->timeSlots[$startIndex + 1]
+                        : $this->timeSlots[$startIndex];
+                    $slotReasons = array_values($issues[$day][$slot] ?? []);
+                    if ($slotReasons === []) {
+                        $slotReasons[] = 'No direct conflict in the deepest partial schedule; the solver could not place all remaining required sessions together.';
+                    }
+                    $message .= "\n- {$day} {$slot}: ".implode(' ', array_unique($slotReasons));
+                }
+            }
+        }
+
+        return $message;
+    }
+
+    private function sessionDescription(
+        ?string $subjectName,
+        ?string $subjectCode,
+        ?string $type,
+        ?string $batch,
+        ?string $facultyName,
+        ?string $roomNumber,
+        string $source
+    ): string {
+        $subject = $subjectName ?? 'Unknown subject';
+        if ($subjectCode) {
+            $subject .= " ({$subjectCode})";
+        }
+        $activity = $type ?? 'session';
+        if ($batch) {
+            $activity .= " {$batch}";
+        }
+
+        return "{$source}: {$subject} {$activity}; faculty ".($facultyName ?? 'unassigned')
+            .'; classroom '.($roomNumber ?? 'unassigned');
     }
 
     private function timeInMinutes(string $time): ?int
@@ -786,6 +1191,23 @@ class TimetableGenerator
     private function pairedPracticalBatches(string $batch): ?array
     {
         if (preg_match('/^(.*?)([1-4])$/', $batch, $matches) !== 1) {
+            return null;
+        }
+
+        $pairStart = (int) $matches[2] <= 2 ? 1 : 3;
+
+        return [
+            $matches[1].$pairStart,
+            $matches[1].($pairStart + 1),
+        ];
+    }
+
+    /**
+     * @return array{0: string, 1: string}|null
+     */
+    private function pairedTutorialBatches(string $batch): ?array
+    {
+        if (preg_match('/^(.*?T?)([1-4])$/i', $batch, $matches) !== 1) {
             return null;
         }
 

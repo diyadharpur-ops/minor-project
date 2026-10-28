@@ -346,7 +346,17 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
         // format to match timetable view expectations
         $sessions = [];
         foreach ($entries as $entry) {
-            $isPractical = strcasecmp((string)$entry->lecture_type, 'Practical') === 0;
+            // Strictly exclude batches that belong to other classes/divisions
+            if (! empty($entry->activity_batch)) {
+                $bClean = trim((string) $entry->activity_batch);
+                // For Class A, allowed are A1..A4, AT1..AT4, etc.
+                if (! str_starts_with($bClean, $division)) {
+                    continue;
+                }
+            }
+
+            $isPractical = strcasecmp((string) $entry->lecture_type, 'Practical') === 0;
+            $isTutorial = strcasecmp((string) $entry->lecture_type, 'Tutorial') === 0;
             $allocationType = $isPractical ? 'Lab' : 'Classroom';
             $activityType = $isPractical ? 'Practical' : $entry->lecture_type;
             $roomMatchesType = fn (?Classroom $room): bool => $room !== null
@@ -366,34 +376,61 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
 
             $selectedRoomAllocation = null;
             $hasMatchingRoomAllocation = false;
-            foreach (array_values(array_unique([...$batchCandidates, $division])) as $batchCandidate) {
-                $matchingAllocations = $managedAllocations
+            if ($isTutorial && $entry->activity_batch) {
+                $activityAllocations = $managedAllocations
                     ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
-                        && $allocation->activity_type === null
-                        && ($allocation->allocation_type === $allocationType || $allocation->allocation_type === null)
-                        && $allocation->division === $batchCandidate)
+                        && $allocation->activity_type === 'Tutorial'
+                        && $allocation->activity_batch === $entry->activity_batch)
                     ->sortByDesc('id');
-                $hasMatchingRoomAllocation = $hasMatchingRoomAllocation || $matchingAllocations->isNotEmpty();
-                $selectedRoomAllocation = $matchingAllocations->first(
+                $hasMatchingRoomAllocation = $activityAllocations->isNotEmpty();
+                $selectedRoomAllocation = $activityAllocations->first(
                     fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
                         && $allocation->classroom?->availability === 'Available'
                 );
 
-                if ($selectedRoomAllocation) {
-                    break;
+                if ($activityAllocations->isEmpty()) {
+                    $legacyAllocations = $managedAllocations
+                        ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                            && $allocation->activity_type === null
+                            && ($allocation->allocation_type === 'Classroom' || $allocation->allocation_type === null)
+                            && $allocation->division === $entry->activity_batch)
+                        ->sortByDesc('id');
+                    $hasMatchingRoomAllocation = $legacyAllocations->isNotEmpty();
+                    $selectedRoomAllocation = $legacyAllocations->first(
+                        fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
+                            && $allocation->classroom?->availability === 'Available'
+                    );
                 }
+            } else {
+                foreach (array_values(array_unique([...$batchCandidates, $division])) as $batchCandidate) {
+                    $matchingAllocations = $managedAllocations
+                        ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                            && $allocation->activity_type === null
+                            && ($allocation->allocation_type === $allocationType || $allocation->allocation_type === null)
+                            && $allocation->division === $batchCandidate)
+                        ->sortByDesc('id');
+                    $hasMatchingRoomAllocation = $hasMatchingRoomAllocation || $matchingAllocations->isNotEmpty();
+                    $selectedRoomAllocation = $matchingAllocations->first(
+                        fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
+                            && $allocation->classroom?->availability === 'Available'
+                    );
 
-                $activityAllocation = $managedAllocations
-                    ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
-                        && $allocation->activity_type === $activityType
-                        && $allocation->activity_batch === ($entry->activity_batch ?: null))
-                    ->sortByDesc('id')
-                    ->first(fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
-                        && $allocation->classroom?->availability === 'Available');
-                if ($activityAllocation) {
-                    $selectedRoomAllocation = $activityAllocation;
-                    $hasMatchingRoomAllocation = true;
-                    break;
+                    if ($selectedRoomAllocation) {
+                        break;
+                    }
+
+                    $activityAllocation = $managedAllocations
+                        ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                            && $allocation->activity_type === $activityType
+                            && $allocation->activity_batch === ($entry->activity_batch ?: null))
+                        ->sortByDesc('id')
+                        ->first(fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
+                            && $allocation->classroom?->availability === 'Available');
+                    if ($activityAllocation) {
+                        $selectedRoomAllocation = $activityAllocation;
+                        $hasMatchingRoomAllocation = true;
+                        break;
+                    }
                 }
             }
 
@@ -437,7 +474,10 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
                 $subShort = preg_replace('/\s*\(.*?\)\s*/', '', (string) $subShort);
                 $cleanSubCode = strtoupper(trim($subShort));
 
-                $batches = $entry->subject?->division_selections ?? [];
+                $batches = collect($entry->subject?->division_selections ?? [])
+                    ->filter(fn ($b) => ! empty($b) && str_starts_with($b, $division))
+                    ->values()
+                    ->all();
                 if (empty($batches)) {
                     $batches = $managedAllocations
                         ->filter(fn ($a) => $a->subject_id === $entry->subject_id && ($a->activity_type === 'Practical' || $a->allocation_type === 'Lab'))
@@ -451,6 +491,58 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
                     $batches = [$division.'1', $division.'2', $division.'3', $division.'4'];
                 }
                 sort($batches);
+
+                // Helper to resolve lab room for an individual batch
+                $resolveLabRoomForBatch = function (string $b) use ($entry, $managedAllocations, $entries, $resolvedClassroom): string {
+                    $roomAlloc = $managedAllocations
+                        ->filter(fn ($a) => $a->subject_id === $entry->subject_id
+                            && ($a->allocation_type === 'Lab' || ($a->classroom && str_contains(strtolower($a->classroom->room_type), 'lab')))
+                            && ($a->division === $b || $a->activity_batch === $b)
+                            && ! empty($a->classroom))
+                        ->sortByDesc('id')
+                        ->first();
+                    $bRoom = $roomAlloc?->classroom?->room_number;
+                    if (empty($bRoom)) {
+                        $anyLab = $managedAllocations
+                            ->filter(fn ($a) => ($a->division === $b || $a->activity_batch === $b)
+                                && ! empty($a->classroom)
+                                && str_contains(strtolower($a->classroom->room_type), 'lab'))
+                            ->sortByDesc('id')
+                            ->first();
+                        $bRoom = $anyLab?->classroom?->room_number;
+                    }
+                    if (empty($bRoom)) {
+                        $matchEntry = $entries->first(fn ($e) => $e->subject_id === $entry->subject_id
+                            && $e->activity_batch === $b
+                            && ! empty($e->classroom));
+                        $bRoom = $matchEntry?->classroom?->room_number ?? $resolvedClassroom?->room_number ?? $entry->classroom?->room_number ?? '';
+                    }
+                    $cleanRoom = strtoupper(trim(preg_replace('/^Lab:\s*/i', '', (string) $bRoom)));
+
+                    return ! empty($cleanRoom) ? $cleanRoom : 'LAB';
+                };
+
+                // Group rooms into pairs: 1 & 2 share pair 1 room; 3 & 4 share pair 2 room
+                $pairedRooms = [];
+                foreach ($batches as $batch) {
+                    if (preg_match('/^(.*?)([1-4])$/', $batch, $m) === 1) {
+                        $pairNum = (int) $m[2] <= 2 ? 1 : 2;
+                        $pairKey = $m[1].'_pair_'.$pairNum;
+                        if (! isset($pairedRooms[$pairKey])) {
+                            // Find preferred room for pair: check pairStart batch first, then pairStart + 1
+                            $pairStartBatch = $m[1].($pairNum === 1 ? '1' : '3');
+                            $pairNextBatch = $m[1].($pairNum === 1 ? '2' : '4');
+                            $r = $resolveLabRoomForBatch($pairStartBatch);
+                            if ($r === 'LAB') {
+                                $rNext = $resolveLabRoomForBatch($pairNextBatch);
+                                if ($rNext !== 'LAB') {
+                                    $r = $rNext;
+                                }
+                            }
+                            $pairedRooms[$pairKey] = $r;
+                        }
+                    }
+                }
 
                 foreach ($batches as $batch) {
                     // 1. Faculty for this batch
@@ -470,33 +562,13 @@ Route::match(['get', 'post'], '/admin/timetable', function () {
                     }
                     $bFacInitials = $getFacultyInitials($bFacName) ?: ($facultyInitials ?: 'DF');
 
-                    // 2. Lab Room for this batch
-                    $roomAlloc = $managedAllocations
-                        ->filter(fn ($a) => $a->subject_id === $entry->subject_id
-                            && ($a->allocation_type === 'Lab' || ($a->classroom && str_contains(strtolower($a->classroom->room_type), 'lab')))
-                            && ($a->division === $batch || $a->activity_batch === $batch)
-                            && ! empty($a->classroom))
-                        ->sortByDesc('id')
-                        ->first();
-                    $bRoom = $roomAlloc?->classroom?->room_number;
-                    if (empty($bRoom)) {
-                        $anyLab = $managedAllocations
-                            ->filter(fn ($a) => ($a->division === $batch || $a->activity_batch === $batch)
-                                && ! empty($a->classroom)
-                                && str_contains(strtolower($a->classroom->room_type), 'lab'))
-                            ->sortByDesc('id')
-                            ->first();
-                        $bRoom = $anyLab?->classroom?->room_number;
-                    }
-                    if (empty($bRoom)) {
-                        $matchEntry = $entries->first(fn ($e) => $e->subject_id === $entry->subject_id
-                            && $e->activity_batch === $batch
-                            && ! empty($e->classroom));
-                        $bRoom = $matchEntry?->classroom?->room_number ?? $resolvedClassroom?->room_number ?? $entry->classroom?->room_number ?? '';
-                    }
-                    $cleanRoom = strtoupper(trim(preg_replace('/^Lab:\s*/i', '', (string) $bRoom)));
-                    if (empty($cleanRoom)) {
-                        $cleanRoom = 'LAB';
+                    // 2. Lab Room for this batch (ensuring paired locations)
+                    if (preg_match('/^(.*?)([1-4])$/', $batch, $m) === 1) {
+                        $pairNum = (int) $m[2] <= 2 ? 1 : 2;
+                        $pairKey = $m[1].'_pair_'.$pairNum;
+                        $cleanRoom = $pairedRooms[$pairKey] ?? $resolveLabRoomForBatch($batch);
+                    } else {
+                        $cleanRoom = $resolveLabRoomForBatch($batch);
                     }
 
                     $labBatches[] = [
@@ -2766,6 +2838,17 @@ Route::middleware(['web'])->group(function () {
                 ->values();
         }
 
+        $className = $rawDeptName.'-'.$semester.'-'.$division;
+        $managedAllocations = RoomAllocation::with(['classroom', 'secondClassroom', 'faculty', 'subject'])
+            ->where('department_id', $deptId)
+            ->where('semester', $semester)
+            ->where(function ($q) use ($division, $className) {
+                $q->whereIn('class_name', array_values(array_unique([$division, $className])))
+                    ->orWhere('division', $division)
+                    ->orWhere('division', 'like', $division.'%');
+            })
+            ->get();
+
         $getFacultyInitials = function (?string $name): string {
             if (empty($name)) {
                 return '';
@@ -2785,22 +2868,249 @@ Route::middleware(['web'])->group(function () {
 
         $sessions = [];
         foreach ($entries as $entry) {
-            $roomName = $entry->classroom
-                ? ($entry->classroom->room_type.': '.$entry->classroom->room_number.($entry->classroom->location ? ' - '.$entry->classroom->location : ''))
-                : 'Room unavailable';
+            // Strictly exclude batches that belong to other classes/divisions
+            if (! empty($entry->activity_batch)) {
+                $bClean = trim((string) $entry->activity_batch);
+                if (! str_starts_with($bClean, $division)) {
+                    continue;
+                }
+            }
+
+            $isPractical = strcasecmp((string) $entry->lecture_type, 'Practical') === 0;
+            $isTutorial = strcasecmp((string) $entry->lecture_type, 'Tutorial') === 0;
+            $allocationType = $isPractical ? 'Lab' : 'Classroom';
+            $activityType = $isPractical ? 'Practical' : $entry->lecture_type;
+            $roomMatchesType = fn (?Classroom $room): bool => $room !== null
+                && ($isPractical
+                    ? str_contains(strtolower((string) $room->room_type), 'lab')
+                    : ! str_contains(strtolower((string) $room->room_type), 'lab'));
+            $batchCandidates = [$entry->activity_batch ?: $division];
+
+            if ($isPractical && $entry->activity_batch
+                && preg_match('/^(.*?)([1-4])$/', $entry->activity_batch, $matches) === 1) {
+                $pairStart = (int) $matches[2] <= 2 ? 1 : 3;
+                $batchCandidates = [
+                    $matches[1].$pairStart,
+                    $matches[1].($pairStart + 1),
+                ];
+            }
+
+            $selectedRoomAllocation = null;
+            $hasMatchingRoomAllocation = false;
+            if ($isTutorial && $entry->activity_batch) {
+                $activityAllocations = $managedAllocations
+                    ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                        && $allocation->activity_type === 'Tutorial'
+                        && $allocation->activity_batch === $entry->activity_batch)
+                    ->sortByDesc('id');
+                $hasMatchingRoomAllocation = $activityAllocations->isNotEmpty();
+                $selectedRoomAllocation = $activityAllocations->first(
+                    fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
+                        && $allocation->classroom?->availability === 'Available'
+                );
+
+                if ($activityAllocations->isEmpty()) {
+                    $legacyAllocations = $managedAllocations
+                        ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                            && $allocation->activity_type === null
+                            && ($allocation->allocation_type === 'Classroom' || $allocation->allocation_type === null)
+                            && $allocation->division === $entry->activity_batch)
+                        ->sortByDesc('id');
+                    $hasMatchingRoomAllocation = $legacyAllocations->isNotEmpty();
+                    $selectedRoomAllocation = $legacyAllocations->first(
+                        fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
+                            && $allocation->classroom?->availability === 'Available'
+                    );
+                }
+            } else {
+                foreach (array_values(array_unique([...$batchCandidates, $division])) as $batchCandidate) {
+                    $matchingAllocations = $managedAllocations
+                        ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                            && $allocation->activity_type === null
+                            && ($allocation->allocation_type === $allocationType || $allocation->allocation_type === null)
+                            && $allocation->division === $batchCandidate)
+                        ->sortByDesc('id');
+                    $hasMatchingRoomAllocation = $hasMatchingRoomAllocation || $matchingAllocations->isNotEmpty();
+                    $selectedRoomAllocation = $matchingAllocations->first(
+                        fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
+                            && $allocation->classroom?->availability === 'Available'
+                    );
+
+                    if ($selectedRoomAllocation) {
+                        break;
+                    }
+
+                    $activityAllocation = $managedAllocations
+                        ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                            && $allocation->activity_type === $activityType
+                            && $allocation->activity_batch === ($entry->activity_batch ?: null))
+                        ->sortByDesc('id')
+                        ->first(fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom)
+                            && $allocation->classroom?->availability === 'Available');
+                    if ($activityAllocation) {
+                        $selectedRoomAllocation = $activityAllocation;
+                        $hasMatchingRoomAllocation = true;
+                        break;
+                    }
+                }
+            }
+
+            $room = $selectedRoomAllocation?->classroom;
+            $fallbackRoom = $roomMatchesType($entry->classroom)
+                && $entry->classroom?->availability === 'Available'
+                ? $entry->classroom
+                : null;
+            $resolvedClassroom = $room ?? ($hasMatchingRoomAllocation ? null : $fallbackRoom);
+            $roomLabel = $isPractical ? 'Lab' : 'Classroom';
+            $roomNumber = $resolvedClassroom?->room_number ?? '';
+            $roomLocation = $resolvedClassroom?->location ?? '';
+            $roomName = $resolvedClassroom
+                ? $roomLabel.': '.$resolvedClassroom->room_number.($resolvedClassroom->location ? ' - '.$resolvedClassroom->location : '')
+                : ($hasMatchingRoomAllocation
+                    ? $roomLabel.' unavailable'
+                    : ($fallbackRoom
+                        ? $roomLabel.': '.$fallbackRoom->room_number.($fallbackRoom->location ? ' - '.$fallbackRoom->location : '')
+                        : $roomLabel.' unavailable'));
+            if (! $selectedRoomAllocation && ! $hasMatchingRoomAllocation
+                && $entry->notes && str_starts_with($entry->notes, 'Room2:')) {
+                $roomName .= ' + '.substr($entry->notes, 6);
+                $roomNumber .= ' + '.substr($entry->notes, 6);
+            } elseif ($selectedRoomAllocation?->secondClassroom) {
+                $secondRoom = $selectedRoomAllocation->secondClassroom;
+                $roomName .= ' + '.$secondRoom->room_number.($secondRoom->location ? ' - '.$secondRoom->location : '');
+                $roomNumber .= ' + '.$secondRoom->room_number;
+            }
+
+            $facultyName = $entry->faculty ? $entry->faculty->name : '';
+            $facultyInitials = $getFacultyInitials($facultyName);
+
+            // Pre-resolve all allocated batches if this is a Practical / Lab session
+            $labBatches = [];
+            if ($isPractical) {
+                $rawSubName = $entry->subject ? $entry->subject->name : '';
+                $rawSubCode = $entry->subject ? $entry->subject->subject_code : '';
+                $subShort = (strlen($rawSubName) > 0 && strlen($rawSubName) <= 8)
+                    ? $rawSubName
+                    : ($rawSubCode ?: $rawSubName);
+                $subShort = preg_replace('/\s*\(.*?\)\s*/', '', (string) $subShort);
+                $cleanSubCode = strtoupper(trim($subShort));
+
+                $batches = collect($entry->subject?->division_selections ?? [])
+                    ->filter(fn ($b) => ! empty($b) && str_starts_with($b, $division))
+                    ->values()
+                    ->all();
+                if (empty($batches)) {
+                    $batches = $managedAllocations
+                        ->filter(fn ($a) => $a->subject_id === $entry->subject_id && ($a->activity_type === 'Practical' || $a->allocation_type === 'Lab'))
+                        ->map(fn ($a) => $a->activity_batch ?: $a->division)
+                        ->filter(fn ($b) => ! empty($b) && str_starts_with($b, $division))
+                        ->unique()
+                        ->values()
+                        ->all();
+                }
+                if (empty($batches)) {
+                    $batches = [$division.'1', $division.'2', $division.'3', $division.'4'];
+                }
+                sort($batches);
+
+                $resolveLabRoomForBatch = function (string $b) use ($entry, $managedAllocations, $entries, $resolvedClassroom): string {
+                    $roomAlloc = $managedAllocations
+                        ->filter(fn ($a) => $a->subject_id === $entry->subject_id
+                            && ($a->allocation_type === 'Lab' || ($a->classroom && str_contains(strtolower($a->classroom->room_type), 'lab')))
+                            && ($a->division === $b || $a->activity_batch === $b)
+                            && ! empty($a->classroom))
+                        ->sortByDesc('id')
+                        ->first();
+                    $bRoom = $roomAlloc?->classroom?->room_number;
+                    if (empty($bRoom)) {
+                        $anyLab = $managedAllocations
+                            ->filter(fn ($a) => ($a->division === $b || $a->activity_batch === $b)
+                                && ! empty($a->classroom)
+                                && str_contains(strtolower($a->classroom->room_type), 'lab'))
+                            ->sortByDesc('id')
+                            ->first();
+                        $bRoom = $anyLab?->classroom?->room_number;
+                    }
+                    if (empty($bRoom)) {
+                        $matchEntry = $entries->first(fn ($e) => $e->subject_id === $entry->subject_id
+                            && $e->activity_batch === $b
+                            && ! empty($e->classroom));
+                        $bRoom = $matchEntry?->classroom?->room_number ?? $resolvedClassroom?->room_number ?? $entry->classroom?->room_number ?? '';
+                    }
+                    $cleanRoom = strtoupper(trim(preg_replace('/^Lab:\s*/i', '', (string) $bRoom)));
+
+                    return ! empty($cleanRoom) ? $cleanRoom : 'LAB';
+                };
+
+                $pairedRooms = [];
+                foreach ($batches as $batch) {
+                    if (preg_match('/^(.*?)([1-4])$/', $batch, $m) === 1) {
+                        $pairNum = (int) $m[2] <= 2 ? 1 : 2;
+                        $pairKey = $m[1].'_pair_'.$pairNum;
+                        if (! isset($pairedRooms[$pairKey])) {
+                            $pairStartBatch = $m[1].($pairNum === 1 ? '1' : '3');
+                            $pairNextBatch = $m[1].($pairNum === 1 ? '2' : '4');
+                            $r = $resolveLabRoomForBatch($pairStartBatch);
+                            if ($r === 'LAB') {
+                                $rNext = $resolveLabRoomForBatch($pairNextBatch);
+                                if ($rNext !== 'LAB') {
+                                    $r = $rNext;
+                                }
+                            }
+                            $pairedRooms[$pairKey] = $r;
+                        }
+                    }
+                }
+
+                foreach ($batches as $batch) {
+                    $facAlloc = $managedAllocations
+                        ->filter(fn ($a) => $a->subject_id === $entry->subject_id
+                            && $a->activity_type === 'Practical'
+                            && ($a->activity_batch === $batch || $a->division === $batch)
+                            && ! empty($a->faculty))
+                        ->sortByDesc('id')
+                        ->first();
+                    $bFacName = $facAlloc?->faculty?->name;
+                    if (empty($bFacName)) {
+                        $matchEntry = $entries->first(fn ($e) => $e->subject_id === $entry->subject_id
+                            && $e->activity_batch === $batch
+                            && ! empty($e->faculty));
+                        $bFacName = $matchEntry?->faculty?->name ?? $entry->faculty?->name ?? '';
+                    }
+                    $bFacInitials = $getFacultyInitials($bFacName) ?: ($facultyInitials ?: 'DF');
+
+                    if (preg_match('/^(.*?)([1-4])$/', $batch, $m) === 1) {
+                        $pairNum = (int) $m[2] <= 2 ? 1 : 2;
+                        $pairKey = $m[1].'_pair_'.$pairNum;
+                        $cleanRoom = $pairedRooms[$pairKey] ?? $resolveLabRoomForBatch($batch);
+                    } else {
+                        $cleanRoom = $resolveLabRoomForBatch($batch);
+                    }
+
+                    $labBatches[] = [
+                        'batch' => $batch,
+                        'subject_code' => $cleanSubCode,
+                        'faculty_initials' => $bFacInitials,
+                        'room' => $cleanRoom,
+                        'line' => "{$batch}-{$cleanSubCode}-{$bFacInitials}-{$cleanRoom}",
+                    ];
+                }
+            }
 
             $sessions[] = [
                 'day' => $entry->day,
                 'time_slot' => $entry->time_slot,
                 'subject' => $entry->subject ? $entry->subject->name : '',
                 'subject_code' => $entry->subject ? ($entry->subject->subject_code ?: '') : '',
-                'faculty' => $entry->faculty ? $entry->faculty->name : '',
-                'faculty_initials' => $getFacultyInitials($entry->faculty?->name),
+                'faculty' => $facultyName,
+                'faculty_initials' => $facultyInitials,
                 'room' => $roomName,
-                'room_number' => $entry->classroom?->room_number ?? '',
+                'room_number' => $roomNumber ?: $roomName,
+                'room_location' => $roomLocation,
                 'type' => $entry->lecture_type,
                 'batch' => $entry->activity_batch,
-                'duration' => (int) ($entry->duration ?: 1),
+                'duration' => $isPractical ? 2 : (int) ($entry->duration ?: 1),
+                'lab_batches' => $labBatches,
             ];
         }
 
