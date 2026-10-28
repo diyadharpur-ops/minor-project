@@ -36,9 +36,13 @@ class Subject extends Model
 
     public function getWeeklyHoursAttribute(): int
     {
-        return $this->lecture_weekly_hours
+        $hours = $this->lecture_weekly_hours
             + $this->lab_weekly_hours
             + $this->tutorial_weekly_hours;
+
+        return $hours > 0 || ! str_contains(strtolower((string) $this->subject_type), 'project')
+            ? $hours
+            : (int) ($this->credit ?? 0) * count($this->effective_class_selections);
     }
 
     public function getEffectiveClassSelectionsAttribute(): array
@@ -130,9 +134,17 @@ class Subject extends Model
 
     public function weeklyHoursForClass(string $class): int
     {
-        return $this->lectureCreditsForClass($class)
+        $hours = $this->lectureCreditsForClass($class)
             + ($this->labCreditsForClass($class) * 2)
             + $this->tutorialCreditsForClass($class);
+
+        if ($hours > 0
+            || ! str_contains(strtolower((string) $this->subject_type), 'project')
+            || ! in_array($class, $this->effective_class_selections, true)) {
+            return $hours;
+        }
+
+        return (int) ($this->credit ?? 0);
     }
 
     public function getClassSelectionLabelAttribute(): string

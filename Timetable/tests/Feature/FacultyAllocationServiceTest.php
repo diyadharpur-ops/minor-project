@@ -137,6 +137,167 @@ test('faculty allocation service balances workload across faculty for the same s
         ->and(max($groupedLoads) - min($groupedLoads))->toBeLessThanOrEqual(4);
 });
 
+test('faculty allocation assigns mandatory practical and tutorial groups without a lecture credit', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $faculty = Faculty::create([
+        'name' => 'Dr. Practical Faculty',
+        'email' => 'practical.faculty@example.com',
+        'designation' => 'Assistant Professor',
+        'department_id' => $department->id,
+    ]);
+    $subject = Subject::create([
+        'name' => 'Applied Programming',
+        'subject_code' => 'CS-302',
+        'semester' => '3',
+        'department_id' => $department->id,
+        'subject_type' => 'Practical',
+        'lab_credit' => 1,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1'],
+        'tutorial_selections' => ['AT1'],
+    ]);
+
+    $result = (new FacultyAllocationService)->generateForSelection([
+        'department_id' => $department->id,
+        'semester' => '3',
+        'division' => 'A',
+    ]);
+    $allocations = RoomAllocation::query()
+        ->where('subject_id', $subject->id)
+        ->get()
+        ->keyBy('activity_type');
+
+    expect($result['count'])->toBe(2)
+        ->and($result['warnings'])->toBeEmpty()
+        ->and($allocations->get('Practical')->faculty_id)->toBe($faculty->id)
+        ->and($allocations->get('Tutorial')->faculty_id)->toBe($faculty->id);
+});
+
+test('faculty allocation assigns minor projects from the existing faculty roster and saves assignments idempotently', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $faculty = Faculty::create([
+        'name' => 'Dr. Project Faculty',
+        'email' => 'project.faculty@example.com',
+        'designation' => 'Assistant Professor',
+        'department_id' => $department->id,
+        'subjects' => 'CS-590',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Minor Project',
+        'subject_code' => 'CS-590',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'subject_type' => 'Minor Project',
+        'credit' => 2,
+        'class_selections' => ['A'],
+    ]);
+    $selection = [
+        'department_id' => $department->id,
+        'semester' => '5',
+        'division' => 'A',
+        '_token' => 'test-token',
+    ];
+    $session = [
+        '_token' => 'test-token',
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ];
+
+    $this->withSession($session)
+        ->post('/admin/faculty-allocation/generate', $selection)
+        ->assertRedirect()
+        ->assertSessionHas('faculty_allocation_status', 'Auto allocation completed: assigned faculty to 1 subject activities.');
+
+    $allocation = RoomAllocation::query()
+        ->where('subject_id', $subject->id)
+        ->where('class_name', 'Computer Science-5-A')
+        ->firstOrFail();
+
+    expect($allocation->activity_type)->toBe('Minor Project')
+        ->and($allocation->faculty_id)->toBe($faculty->id)
+        ->and($subject->weekly_hours)->toBe(2)
+        ->and($subject->weeklyHoursForClass('A'))->toBe(2)
+        ->and(Faculty::count())->toBe(1);
+
+    $this->withSession($session)
+        ->post('/admin/faculty-allocation/generate', $selection)
+        ->assertRedirect();
+
+    expect(RoomAllocation::query()
+        ->where('subject_id', $subject->id)
+        ->where('class_name', 'Computer Science-5-A')
+        ->count())->toBe(1)
+        ->and(RoomAllocation::findOrFail($allocation->id)->faculty_id)->toBe($faculty->id);
+
+    $this->withSession($session)
+        ->get('/admin/faculty-allocation?department_id='.$department->id.'&semester=5&division=A')
+        ->assertOk()
+        ->assertSee('Auto Allocate Faculty')
+        ->assertSee('Dr. Project Faculty')
+        ->assertSee('Minor Project')
+        ->assertDontSee('Theory faculty required')
+        ->assertDontSee('Select faculty')
+        ->assertDontSee('name="faculty_id"');
+});
+
+test('faculty allocation respects workload limits and falls back when a subject expert is overloaded', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $expert = Faculty::create([
+        'name' => 'Dr. Subject Expert',
+        'email' => 'subject.expert@example.com',
+        'designation' => 'Assistant Professor',
+        'department_id' => $department->id,
+        'subjects' => 'CS-501',
+    ]);
+    $availableFaculty = Faculty::create([
+        'name' => 'Dr. Available',
+        'email' => 'available@example.com',
+        'designation' => 'Assistant Professor',
+        'department_id' => $department->id,
+        'subjects' => 'CS-999',
+    ]);
+    FacultyWorkload::create([
+        'faculty_name' => $expert->name,
+        'faculty_id' => (string) $expert->id,
+        'department' => $department->name,
+        'subjects_assigned' => 'Existing subjects',
+        'weekly_workload' => 17,
+        'total_hours' => 17,
+        'workload_status' => 'Normal',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Operating Systems',
+        'subject_code' => 'CS-501',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'lecture_credit' => 2,
+        'class_selections' => ['A'],
+    ]);
+
+    $result = (new FacultyAllocationService)->generateForSelection([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'division' => 'A',
+    ]);
+    $allocation = RoomAllocation::query()->where('subject_id', $subject->id)->firstOrFail();
+
+    expect($result['count'])->toBe(1)
+        ->and($allocation->faculty_id)->toBe($availableFaculty->id)
+        ->and($allocation->faculty_id)->not->toBe($expert->id);
+});
+
 test('faculty allocation assigns theory faculty to A1 and AT1 and fairly distributes remaining groups', function () {
     $department = Department::create([
         'name' => 'Computer Science',

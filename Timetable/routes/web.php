@@ -1746,12 +1746,12 @@ Route::post('/admin/faculty-allocation/generate', function (
         return redirect('/admin/login');
     }
 
-    $selection = [
-        'department_id' => $request->input('department_id'),
-        'semester' => $request->input('semester'),
-        'division' => $request->input('division'),
-        'batch' => $request->input('batch'),
-    ];
+    $selection = $request->validate([
+        'department_id' => 'required|integer|exists:departments,id',
+        'semester' => 'required|string',
+        'division' => 'required|string',
+        'batch' => 'nullable|string',
+    ]);
 
     $result = $service->generateForSelection($selection);
     $warnings = collect($result['warnings'] ?? []);
@@ -1789,7 +1789,7 @@ Route::post('/admin/faculty-allocation/generate', function (
     $query = http_build_query(array_filter($selection, fn ($value) => $value !== null && $value !== ''));
 
     return redirect('/admin/faculty-allocation'.($query !== '' ? '?'.$query : ''))
-        ->with('faculty_allocation_status', "Generated {$result['count']} faculty allocation records.")
+        ->with('faculty_allocation_status', "Auto allocation completed: assigned faculty to {$result['count']} subject activities.")
         ->with('faculty_allocation_warnings', $result['warnings']->all());
 });
 

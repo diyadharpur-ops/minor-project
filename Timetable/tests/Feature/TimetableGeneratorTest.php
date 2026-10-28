@@ -82,6 +82,62 @@ it('generates conflict-free sessions using the selected class and lab groups', f
         ->toBe($entries->firstWhere('activity_batch', 'A2')->classroom_id);
 });
 
+it('schedules automatically allocated minor project sessions as conflict-free classroom activities', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $faculty = Faculty::create([
+        'name' => 'Prof. Project',
+        'email' => 'project@example.com',
+        'designation' => 'Assistant Professor',
+        'department_id' => $department->id,
+        'subjects' => 'CS-590',
+    ]);
+    Division::create(['name' => 'A', 'semester' => '5', 'is_active' => true]);
+    Classroom::create([
+        'room_number' => 'A101',
+        'room_capacity' => 40,
+        'room_type' => 'Classroom',
+        'availability' => 'Available',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Minor Project',
+        'subject_code' => 'CS-590',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'subject_type' => 'Minor Project',
+        'credit' => 2,
+        'class_selections' => ['A'],
+    ]);
+
+    expect((new TimetableGenerator)->generate(
+        $department->id,
+        '5',
+        'A',
+        '2026-2027',
+        'Odd',
+    ))->toBeTrue();
+
+    $allocations = RoomAllocation::query()
+        ->where('subject_id', $subject->id)
+        ->where('class_name', 'Computer Science-5-A')
+        ->get();
+    $entries = TimetableEntry::query()
+        ->where('department_id', $department->id)
+        ->where('semester', '5')
+        ->where('division', 'A')
+        ->get();
+
+    expect($allocations)->toHaveCount(1)
+        ->and($allocations->first()->activity_type)->toBe('Minor Project')
+        ->and($allocations->first()->faculty_id)->toBe($faculty->id)
+        ->and($entries)->toHaveCount(2)
+        ->and($entries->every(fn (TimetableEntry $entry): bool => $entry->lecture_type === 'Minor Project'
+            && $entry->faculty_id === $faculty->id
+            && $entry->classroom_id !== null))->toBeTrue();
+});
+
 it('uses configured theory and paired lab locations and reflects allocation changes in the timetable view', function () {
     $department = Department::create([
         'name' => 'Computer Science',
@@ -288,6 +344,7 @@ it('refreshes an existing timetable after faculty allocations are regenerated', 
     $subject->update(['faculty_id' => $replacementTheoryFaculty->id]);
 
     $this->withSession([
+        '_token' => 'test-token',
         'admin.auth' => [
             'name' => 'Admin User',
             'email' => 'admin@example.com',
@@ -296,6 +353,7 @@ it('refreshes an existing timetable after faculty allocations are regenerated', 
         'department_id' => $department->id,
         'semester' => '5',
         'division' => 'A',
+        '_token' => 'test-token',
     ])->assertRedirect('/admin/faculty-allocation?department_id='.$department->id.'&semester=5&division=A');
 
     $entries = TimetableEntry::query()
@@ -329,12 +387,14 @@ it('refreshes an existing timetable after faculty allocations are regenerated', 
         ->firstOrFail();
 
     $this->withSession([
+        '_token' => 'test-token',
         'admin.auth' => [
             'name' => 'Admin User',
             'email' => 'admin@example.com',
         ],
     ])->post('/admin/faculty-allocation/'.$practicalAllocation->id.'/faculty', [
         'faculty_id' => $manualFaculty->id,
+        '_token' => 'test-token',
     ])->assertRedirect('/admin/faculty-allocation?department_id='.$department->id.'&semester=5&division=A&batch='.urlencode($department->id.'|5|A'));
 
     expect($practicalAllocation->fresh()->faculty_id)->toBe($manualFaculty->id)

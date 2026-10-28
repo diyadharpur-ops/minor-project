@@ -346,6 +346,19 @@ class TimetableGenerator
                         ]);
                         $totalHours++;
                     }
+                } elseif (stripos($subject->subject_type ?? '', 'project') !== false) {
+                    $projectType = stripos($subject->subject_type ?? '', 'minor') !== false ? 'Minor Project' : 'Project';
+                    for ($i = 0; $i < (int) $subject->credit; $i++) {
+                        $blocks->push((object) [
+                            'type' => $projectType,
+                            'batch' => null,
+                            'duration' => 1,
+                            'subject' => $subject,
+                            'faculty' => $getActivityFaculty($subject, $projectType, null, $theoryFaculty),
+                            'allocation' => $findRoomAllocation($subject, $projectType, null),
+                        ]);
+                        $totalHours++;
+                    }
                 } else {
                     $lectureCount = (int) $subject->credit;
                 }
@@ -424,7 +437,7 @@ class TimetableGenerator
 
             // Important: Place 2-hour Practicals first so they don't get blocked by 1-hour gaps near breaks
             $practicals = $blocks->where('type', 'Practical')->shuffle();
-            $theories = $blocks->whereIn('type', ['Lecture', 'Tutorial'])->shuffle();
+            $theories = $blocks->whereIn('type', ['Lecture', 'Tutorial', 'Minor Project', 'Project'])->shuffle();
             $orderedBlocks = $practicals->merge($theories);
 
             foreach ($orderedBlocks as $block) {

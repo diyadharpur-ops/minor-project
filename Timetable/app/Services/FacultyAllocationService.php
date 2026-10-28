@@ -133,7 +133,7 @@ class FacultyAllocationService
 
     public function generateForSelection(array $selection = []): array
     {
-        $created = 0;
+        $assigned = 0;
         $warnings = collect();
         $batches = $this->batchesForSelection($selection);
 
@@ -161,7 +161,7 @@ class FacultyAllocationService
             ->get();
 
         DB::transaction(function () use (
-            &$created,
+            &$assigned,
             $warnings,
             $batches,
             $eligibleFaculty,
@@ -171,6 +171,9 @@ class FacultyAllocationService
             $facultyOccupancy
         ): void {
             foreach ($batches as $batch) {
+                $batchFaculty = $eligibleFaculty
+                    ->where('department_id', (int) $batch['department_id'])
+                    ->values();
                 $subjects = Subject::query()
                     ->with('faculty', 'division')
                     ->where('department_id', $batch['department_id'])
@@ -241,9 +244,12 @@ class FacultyAllocationService
 
                     if ($activityRows === [] && (int) ($subject->credit ?? 0) > 0) {
                         $subjectType = mb_strtolower((string) $subject->subject_type);
-                        $fallbackType = str_contains($subjectType, 'lab') || str_contains($subjectType, 'practical')
-                            ? 'Practical'
-                            : (str_contains($subjectType, 'tutorial') ? 'Tutorial' : 'Lecture');
+                        $fallbackType = match (true) {
+                            str_contains($subjectType, 'lab'), str_contains($subjectType, 'practical') => 'Practical',
+                            str_contains($subjectType, 'tutorial') => 'Tutorial',
+                            str_contains($subjectType, 'project') => str_contains($subjectType, 'minor') ? 'Minor Project' : 'Project',
+                            default => 'Lecture',
+                        };
                         $activityRows[] = [
                             'type' => $fallbackType,
                             'batch' => null,
@@ -260,27 +266,40 @@ class FacultyAllocationService
                     $legacyFacultyId = $existingAllocations
                         ->first(fn (RoomAllocation $allocation): bool => $allocation->activity_type === null && $allocation->faculty_id)
                         ?->faculty_id;
-                    $theoryFaculty = $subject->faculty
-                        ?? Faculty::find($existingTheoryAllocation?->faculty_id ?? $legacyFacultyId)
-                        ?? $eligibleFaculty->first(fn (Faculty $faculty): bool => filled($subject->faculty_name)
+                    $preferredFacultyIds = collect([
+                        $subject->faculty_id,
+                        $existingTheoryAllocation?->faculty_id,
+                        $legacyFacultyId,
+                    ])->filter()->unique();
+                    $theoryFaculty = $preferredFacultyIds
+                        ->map(fn (int|string $facultyId): ?Faculty => $batchFaculty->firstWhere('id', (int) $facultyId))
+                        ->filter()
+                        ->first()
+                        ?? $batchFaculty->first(fn (Faculty $faculty): bool => filled($subject->faculty_name)
                             && mb_stripos($faculty->name, (string) $subject->faculty_name) !== false);
 
-                    if (! $theoryFaculty && collect($activityRows)->contains(fn (array $row): bool => $row['type'] === 'Lecture')) {
+                    $leadActivities = collect($activityRows)->filter(
+                        fn (array $row): bool => $row['type'] === 'Lecture' || $row['mandatory'] || $row['batch'] === null
+                    );
+
+                    if (! $theoryFaculty && $leadActivities->isNotEmpty()) {
+                        $leadHours = (int) $leadActivities->sum('hours');
+                        $leadDuration = $leadActivities->contains(fn (array $row): bool => $row['type'] === 'Practical') ? 2 : 1;
                         $theoryFaculty = $this->selectFaculty(
-                            $eligibleFaculty,
+                            $batchFaculty,
                             $subject,
                             [],
-                            (int) collect($activityRows)->firstWhere('type', 'Lecture')['hours'],
+                            $leadHours,
                             $hoursByFaculty,
                             $overloadedFacultyIds,
                             $normalThreshold,
-                            1,
+                            $leadDuration,
                             $facultyOccupancy
                         );
                     }
 
-                    if (! $theoryFaculty) {
-                        $warnings->push("No eligible theory faculty found for {$subject->name} in {$batch['class_name']}.");
+                    if (! $theoryFaculty && $leadActivities->isNotEmpty()) {
+                        $warnings->push("No eligible faculty available for {$subject->name} in {$batch['class_name']}.");
                     }
 
                     foreach ($activityRows as $activity) {
@@ -292,7 +311,7 @@ class FacultyAllocationService
                                     && $allocation->activity_batch === $activity['batch']
                             );
                             $faculty = $this->selectFaculty(
-                                $eligibleFaculty,
+                                $batchFaculty,
                                 $subject,
                                 $theoryFaculty ? [$theoryFaculty->id] : [],
                                 $activity['hours'],
@@ -349,7 +368,9 @@ class FacultyAllocationService
                             'status' => $allocation->exists ? $allocation->status : 'Unallocated',
                         ]);
                         $allocation->save();
-                        $created++;
+                        if ($faculty) {
+                            $assigned++;
+                        }
                     }
 
                     $expectedActivityKeys = collect($activityRows)
@@ -368,7 +389,7 @@ class FacultyAllocationService
         });
 
         return [
-            'count' => $created,
+            'count' => $assigned,
             'warnings' => $warnings->unique()->values(),
         ];
     }
@@ -405,6 +426,7 @@ class FacultyAllocationService
                             'Lecture' => $subject->lectureCreditsForClass((string) $class),
                             'Practical' => (int) ($subject->lab_credit ?? 0) * 2,
                             'Tutorial' => (int) ($subject->tutorial_credit ?? 0),
+                            'Minor Project', 'Project' => (int) ($subject->credit ?? 0),
                             default => 0,
                         };
                         $hoursByFaculty[$allocation->faculty_id] = ($hoursByFaculty[$allocation->faculty_id] ?? 0) + $hours;
@@ -594,9 +616,8 @@ class FacultyAllocationService
         array $facultyOccupancy,
         ?int $preferredFacultyId = null
     ): ?Faculty {
-        $eligibleCandidates = $candidates
+        $availableCandidates = $candidates
             ->filter(function (Faculty $faculty) use (
-                $subject,
                 $excludedFacultyIds,
                 $hours,
                 $hoursByFaculty,
@@ -612,14 +633,21 @@ class FacultyAllocationService
                     return false;
                 }
 
-                $expertise = trim((string) $faculty->subjects);
-                if ($expertise === '') {
-                    return true;
-                }
-
-                return mb_stripos($expertise, $subject->name) !== false
-                    || mb_stripos($expertise, $subject->subject_code) !== false;
+                return true;
             });
+        $expertiseCandidates = $availableCandidates->filter(function (Faculty $faculty) use ($subject): bool {
+            $expertise = trim((string) $faculty->subjects);
+
+            return $expertise !== ''
+                && (mb_stripos($expertise, $subject->name) !== false
+                    || mb_stripos($expertise, $subject->subject_code) !== false);
+        });
+        $unspecifiedExpertiseCandidates = $availableCandidates->filter(
+            fn (Faculty $faculty): bool => trim((string) $faculty->subjects) === ''
+        );
+        $eligibleCandidates = $expertiseCandidates->isNotEmpty()
+            ? $expertiseCandidates
+            : ($unspecifiedExpertiseCandidates->isNotEmpty() ? $unspecifiedExpertiseCandidates : $availableCandidates);
 
         $preferredFaculty = $preferredFacultyId
             ? $eligibleCandidates->firstWhere('id', $preferredFacultyId)
@@ -629,12 +657,12 @@ class FacultyAllocationService
         }
 
         return $eligibleCandidates->sort(function (Faculty $left, Faculty $right) use ($hoursByFaculty): int {
-                $loadComparison = ($hoursByFaculty[$left->id] ?? 0) <=> ($hoursByFaculty[$right->id] ?? 0);
+            $loadComparison = ($hoursByFaculty[$left->id] ?? 0) <=> ($hoursByFaculty[$right->id] ?? 0);
 
-                return $loadComparison !== 0
-                    ? $loadComparison
-                    : strcasecmp($left->name, $right->name);
-            })
+            return $loadComparison !== 0
+                ? $loadComparison
+                : strcasecmp($left->name, $right->name);
+        })
             ->first();
     }
 
@@ -870,7 +898,9 @@ class FacultyAllocationService
             'faculty_id' => $allocation->faculty_id,
             'faculty' => $allocation->faculty?->name ?? $allocation->subject?->faculty?->name,
             'location' => $allocation->notes ?: $allocation->classroom?->room_number,
-            'type' => $isLab ? 'Practical' : 'Theory',
+            'type' => $isLab
+                ? 'Practical'
+                : (in_array($allocation->activity_type, ['Minor Project', 'Project'], true) ? $allocation->activity_type : 'Theory'),
             'status' => $allocation->status,
             'warning' => $allocation->faculty_id ? null : 'Faculty is not assigned to this subject.',
         ];
