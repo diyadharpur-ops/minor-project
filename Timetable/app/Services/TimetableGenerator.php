@@ -377,6 +377,13 @@ class TimetableGenerator
             $tutorialBatches = collect($subject->tutorial_selections ?? [])
                 ->filter(fn (string $batch): bool => str_starts_with($batch, $division))
                 ->values();
+            $labFacultyCount = $labBatches
+                ->map(fn (string $batch): ?int => $getActivityFaculty($subject, 'Practical', $batch, $theoryFaculty)?->id)
+                ->filter()
+                ->unique()
+                ->count();
+            $scheduleLabBatchesTogether = $labBatches->count() > 1
+                && $labFacultyCount === $labBatches->count();
 
             // Fallback for older data without detailed credits
             if ($lectureCount === 0 && $labBatches->isEmpty() && $tutorialBatches->isEmpty() && ($subject->credit ?? 0) > 0) {
@@ -438,6 +445,10 @@ class TimetableGenerator
                         'type' => 'Practical',
                         'batch' => $labBatch,
                         'duration' => 2,
+                        'schedule_group' => $scheduleLabBatchesTogether
+                            ? 'practical:'.$subject->id.':'.$i
+                            : null,
+                        'room_share_group' => $this->pairedBatchGroupKey($subject, 'Practical', $labBatch, $i),
                         'subject' => $subject,
                         'faculty' => $getActivityFaculty($subject, 'Practical', $labBatch, $theoryFaculty),
                         'allocation' => $findRoomAllocation($subject, 'Practical', $labBatch),
@@ -447,10 +458,23 @@ class TimetableGenerator
 
             foreach ($tutorialBatches as $tutorialBatch) {
                 for ($i = 0; $i < (int) ($subject->tutorial_credit ?? 0); $i++) {
+                    $tutorialPairKey = $this->pairedBatchGroupKey($subject, 'Tutorial', $tutorialBatch, $i);
+                    $tutorialPair = $this->pairedTutorialBatches($tutorialBatch);
+                    if ($tutorialPairKey !== null && $tutorialPair !== null) {
+                        $partnerBatch = $tutorialPair[0] === $tutorialBatch ? $tutorialPair[1] : $tutorialPair[0];
+                        $faculty = $getActivityFaculty($subject, 'Tutorial', $tutorialBatch, $theoryFaculty);
+                        $partnerFaculty = $getActivityFaculty($subject, 'Tutorial', $partnerBatch, $theoryFaculty);
+                        if ($faculty?->id === $partnerFaculty?->id) {
+                            $tutorialPairKey = null;
+                        }
+                    }
+
                     $blocks->push((object) [
                         'type' => 'Tutorial',
                         'batch' => $tutorialBatch,
                         'duration' => 1,
+                        'schedule_group' => $tutorialPairKey,
+                        'room_share_group' => $tutorialPairKey,
                         'subject' => $subject,
                         'faculty' => $getActivityFaculty($subject, 'Tutorial', $tutorialBatch, $theoryFaculty),
                         'allocation' => $findRoomAllocation($subject, 'Tutorial', $tutorialBatch),
@@ -539,13 +563,26 @@ class TimetableGenerator
         $state = [
             'faculty' => [],
             'rooms' => [],
+            'room_share_groups' => [],
             'division' => [],
             'batches' => [],
+            'schedule_groups' => [],
             'subject_day' => [],
             'assignments' => [],
         ];
         $addOccupant = static function (array &$occupancy, int|string $resourceId, string $day, string $slot, string $label): void {
             $occupancy[$resourceId][$day][$slot][] = $label;
+        };
+        $addRoomOccupant = static function (
+            array &$state,
+            int|string $roomId,
+            string $day,
+            string $slot,
+            string $label,
+            ?string $shareGroup = null
+        ): void {
+            $state['rooms'][$roomId][$day][$slot][] = $label;
+            $state['room_share_groups'][$roomId][$day][$slot][] = $shareGroup;
         };
         $addTargetClassOccupant = static function (array &$state, ?string $batch, string $day, string $slot, string $label) use ($division): void {
             if ($batch === null || $batch === '' || $batch === $division || ! str_starts_with($batch, $division)) {
@@ -582,12 +619,12 @@ class TimetableGenerator
                     $addOccupant($state['faculty'], $entry->faculty_id, $entry->day, $slot, $label);
                 }
                 if ($entry->classroom_id) {
-                    $addOccupant($state['rooms'], $entry->classroom_id, $entry->day, $slot, $label);
+                    $addRoomOccupant($state, $entry->classroom_id, $entry->day, $slot, $label);
                 }
                 if ($entry->notes && str_starts_with($entry->notes, 'Room2:')) {
                     $secondRoomId = $roomIdByNumber->get(substr($entry->notes, 6));
                     if ($secondRoomId) {
-                        $addOccupant($state['rooms'], $secondRoomId, $entry->day, $slot, $label);
+                        $addRoomOccupant($state, $secondRoomId, $entry->day, $slot, $label);
                     }
                 }
             }
@@ -632,7 +669,7 @@ class TimetableGenerator
                 }
                 foreach ([$allocation->classroom_id, $allocation->second_classroom_id] as $roomId) {
                     if ($roomId) {
-                        $addOccupant($state['rooms'], $roomId, $allocation->day, $slot, $label);
+                        $addRoomOccupant($state, $roomId, $allocation->day, $slot, $label);
                     }
                 }
                 if ($isTargetClass) {
@@ -673,7 +710,8 @@ class TimetableGenerator
             $fixedTimes,
             $division,
             $deptId,
-            $semester
+            $semester,
+            $addRoomOccupant
         ): ?array {
             if (count($currentState['assignments']) > count($bestAssignments)) {
                 $bestAssignments = $currentState['assignments'];
@@ -747,11 +785,32 @@ class TimetableGenerator
                     'notes' => $placement['notes'],
                 ];
                 $nextState['assignments'][$block->id] = $entry;
+                $scheduleGroup = $block->schedule_group ?? null;
+                if ($scheduleGroup !== null) {
+                    $nextState['schedule_groups'][$scheduleGroup] = [
+                        'day' => $placement['day'],
+                        'start_index' => $placement['start_index'],
+                    ];
+                }
                 foreach ($placement['slots'] as $slot) {
                     $nextState['faculty'][$facultyId][$placement['day']][$slot][] = $label;
-                    $nextState['rooms'][$placement['room_id']][$placement['day']][$slot][] = $label;
+                    $addRoomOccupant(
+                        $nextState,
+                        $placement['room_id'],
+                        $placement['day'],
+                        $slot,
+                        $label,
+                        $block->room_share_group ?? null
+                    );
                     if ($placement['second_room_id']) {
-                        $nextState['rooms'][$placement['second_room_id']][$placement['day']][$slot][] = $label;
+                        $addRoomOccupant(
+                            $nextState,
+                            $placement['second_room_id'],
+                            $placement['day'],
+                            $slot,
+                            $label,
+                            $block->room_share_group ?? null
+                        );
                     }
                     if ($block->batch === null) {
                         $nextState['division'][$placement['day']][$slot][] = $label;
@@ -981,6 +1040,18 @@ class TimetableGenerator
                     continue;
                 }
 
+                $scheduleGroup = $block->schedule_group ?? null;
+                $roomShareGroup = $block->room_share_group ?? null;
+                $groupPlacement = $scheduleGroup !== null
+                    ? ($state['schedule_groups'][$scheduleGroup] ?? null)
+                    : null;
+                if ($groupPlacement !== null
+                    && ($groupPlacement['day'] !== $day || $groupPlacement['start_index'] !== $startIndex)) {
+                    $issues[$day][$candidateLabel][] = 'This batch must be scheduled with its paired groups at the same time.';
+
+                    continue;
+                }
+
                 $fixedTimeReasons = [];
                 if ($fixedTime !== null) {
                     if ($fixedTime['error'] !== null) {
@@ -1008,7 +1079,13 @@ class TimetableGenerator
                             if (! $roomId) {
                                 continue;
                             }
-                            foreach ($state['rooms'][$roomId][$day][$slot] ?? [] as $occupant) {
+                            foreach ($state['rooms'][$roomId][$day][$slot] ?? [] as $occupantIndex => $occupant) {
+                                $occupantShareGroup = $state['room_share_groups'][$roomId][$day][$slot][$occupantIndex] ?? null;
+                                // Paired batches sharing one lab/tutorial room form a single concurrent session.
+                                if ($roomShareGroup !== null && $roomShareGroup === $occupantShareGroup) {
+                                    continue;
+                                }
+
                                 $reasons[] = "Classroom conflict with {$occupant}.";
                             }
                         }
@@ -1217,5 +1294,27 @@ class TimetableGenerator
             $matches[1].$pairStart,
             $matches[1].($pairStart + 1),
         ];
+    }
+
+    private function pairedBatchGroupKey(Subject $subject, string $type, ?string $batch, int $creditIndex): ?string
+    {
+        if ($batch === null) {
+            return null;
+        }
+
+        $pair = $type === 'Practical'
+            ? $this->pairedPracticalBatches($batch)
+            : $this->pairedTutorialBatches($batch);
+        $selections = $type === 'Practical'
+            ? ($subject->division_selections ?? [])
+            : ($subject->tutorial_selections ?? []);
+
+        if ($pair === null
+            || ! in_array($pair[0], $selections, true)
+            || ! in_array($pair[1], $selections, true)) {
+            return null;
+        }
+
+        return implode(':', [$type, $subject->id, $pair[0], $pair[1], $creditIndex]);
     }
 }

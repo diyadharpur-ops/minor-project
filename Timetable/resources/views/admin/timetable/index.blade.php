@@ -69,7 +69,7 @@
         </div>
         <div>
             <label style="font-weight: 600; font-size: 13px; color: #334155; display: block; margin-bottom: 4px;">Term Code</label>
-            <input type="text" name="term_code" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px;" value="{{ old('term_code', $termCode) }}" placeholder="e.g. 261" required>
+            <input type="text" name="term_code" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px;" value="{{ old('term_code', $termCode) }}">
         </div>
         <div>
             <label style="font-weight: 600; font-size: 13px; color: #334155; display: block; margin-bottom: 4px;">Academic Year</label>
@@ -77,11 +77,11 @@
         </div>
         <div>
             <label style="font-weight: 600; font-size: 13px; color: #334155; display: block; margin-bottom: 4px;">Term Dates</label>
-            <input type="text" name="term_dates" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px;" value="{{ old('term_dates', $termDates) }}" placeholder="e.g. 23/06/2026 to 07/11/2026">
+            <input type="text" name="term_dates" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px;" value="{{ old('term_dates', $termDates) }}">
         </div>
         <div>
             <label style="font-weight: 600; font-size: 13px; color: #334155; display: block; margin-bottom: 4px;">w.e.f.</label>
-            <input type="text" name="wef_date" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px;" value="{{ old('wef_date', $wefDate) }}" placeholder="e.g. 23/06/2026">
+            <input type="text" name="wef_date" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px;" value="{{ old('wef_date', $wefDate) }}">
         </div>
         <div>
             <label style="font-weight: 600; font-size: 13px; color: #334155; display: block; margin-bottom: 4px;">Skill Based Training</label>
@@ -205,19 +205,19 @@
         /* College Timetable Styles matching Image 2 */
         .timetable-container {
             background-color: #ffffff;
-            color: #000000;
+            color: #1e293b;
             font-family: 'Times New Roman', Times, Georgia, serif;
             margin: 0 auto 30px;
             padding: 24px 30px;
             max-width: 100%;
-            border: 1px solid #000000;
+            border: 1px solid #334155;
             box-shadow: 0 4px 12px rgba(0,0,0,0.06);
         }
 
         .official-header {
             text-align: center;
             margin-bottom: 16px;
-            border-bottom: 1.5px solid #000000;
+            border-bottom: 1.5px solid #334155;
             padding-bottom: 12px;
         }
 
@@ -227,7 +227,7 @@
             margin: 0 0 4px;
             letter-spacing: 1px;
             text-transform: uppercase;
-            color: #000000;
+            color: #1e293b;
         }
 
         .official-header .timetable-title {
@@ -235,7 +235,7 @@
             font-weight: 700;
             margin: 0 0 4px;
             text-transform: uppercase;
-            color: #000000;
+            color: #1e293b;
         }
 
         .official-header .department-name {
@@ -243,7 +243,7 @@
             font-weight: 700;
             margin: 0;
             text-transform: uppercase;
-            color: #000000;
+            color: #1e293b;
         }
 
         .meta-strip {
@@ -253,7 +253,7 @@
             font-size: 13.5px;
             font-weight: 700;
             margin-bottom: 12px;
-            color: #000000;
+            color: #1e293b;
             line-height: 1.4;
         }
 
@@ -280,11 +280,11 @@
 
         .timetable-table th, 
         .timetable-table td {
-            border: 1px solid #000000 !important;
+            border: 1px solid #334155 !important;
             padding: 6px 4px;
             text-align: center;
             vertical-align: middle;
-            color: #000000;
+            color: #1e293b;
             font-size: 12.5px;
             line-height: 1.25;
             word-wrap: break-word;
@@ -293,14 +293,14 @@
         .timetable-table th {
             font-weight: 800;
             text-transform: uppercase;
-            background-color: #ffffff;
+            background-color: #dbeafe;
             font-size: 13px;
             padding: 8px 4px;
         }
 
         .timetable-table th.time-col {
             width: 13%;
-            background-color: #ffffff;
+            background-color: #dbeafe;
         }
 
         .timetable-table th.day-col {
@@ -314,7 +314,7 @@
         }
 
         .recess-row td {
-            background-color: #f2f2f2 !important;
+            background-color: #dbeafe !important;
             font-weight: 800;
             letter-spacing: 2.5px;
             text-align: center;
@@ -330,43 +330,52 @@
             padding: 2px 0;
         }
 
+        .tutorial-entry-line {
+            padding: 2px 0;
+            font-size: 11.5px;
+            font-weight: 700;
+            line-height: 1.3;
+            color: #1e293b;
+            overflow-wrap: anywhere;
+        }
+
         .session-code {
             font-weight: 800;
             font-size: 13px;
-            color: #000000;
+            color: #1e293b;
             margin-bottom: 2px;
         }
 
         .session-code sup {
             font-size: 12px;
             font-weight: 900;
-            color: #000000;
+            color: #1e293b;
         }
 
         .session-sub-name {
             font-size: 11px;
             font-weight: 600;
             margin-bottom: 2px;
-            color: #111111;
+            color: #1e293b;
         }
 
         .session-faculty {
             font-size: 11.5px;
             font-weight: 600;
-            color: #000000;
+            color: #1e293b;
             margin-bottom: 2px;
         }
 
         .session-location {
             font-size: 11px;
             font-weight: 600;
-            color: #111111;
+            color: #1e293b;
         }
 
         .session-type {
             font-size: 10px;
             font-style: italic;
-            color: #333333;
+            color: #1e293b;
         }
 
         /* Batch-wise layout inside practical cell */
@@ -396,7 +405,7 @@
         .batch-tag {
             font-weight: 800;
             margin-right: 4px;
-            color: #000000;
+            color: #1e293b;
         }
 
         .batch-subject {
@@ -405,7 +414,7 @@
 
         .batch-faculty {
             font-size: 10.5px;
-            color: #000000;
+            color: #1e293b;
             margin: 0 4px;
         }
 
@@ -433,9 +442,9 @@
             font-weight: 700;
             line-height: 1.4;
             letter-spacing: 0.3px;
-            color: #000000;
+            color: #1e293b;
             text-align: center;
-            white-space: nowrap;
+            overflow-wrap: anywhere;
         }
 
         /* Footer & Reference Table */
@@ -459,7 +468,7 @@
 
         .subject-reference-wrapper {
             margin-top: 16px;
-            border-top: 1px solid #000000;
+            border-top: 1px solid #334155;
             padding-top: 12px;
         }
 
@@ -480,11 +489,11 @@
 
         .subject-summary-table th,
         .subject-summary-table td {
-            border: 1px solid #000000 !important;
+            border: 1px solid #334155 !important;
             padding: 4px 6px;
             text-align: left;
             vertical-align: middle;
-            color: #000000;
+            color: #1e293b;
         }
 
         .subject-summary-table th {
@@ -510,7 +519,7 @@
         }
 
         .signature-line {
-            border-top: 1px solid #000000;
+            border-top: 1px solid #334155;
             margin-bottom: 6px;
             width: 80%;
             margin-left: auto;
@@ -580,13 +589,13 @@
 
             .timetable-table th, 
             .timetable-table td {
-                border: 1px solid #000000 !important;
+                border: 1px solid #334155 !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
 
             .recess-row td {
-                background-color: #f0f0f0 !important;
+                background-color: #dbeafe !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
@@ -614,9 +623,9 @@
                 font-size: 10pt !important;
                 font-weight: 700 !important;
                 line-height: 1.35 !important;
-                color: #000000 !important;
+                color: #1e293b !important;
                 text-align: center !important;
-                white-space: nowrap !important;
+                overflow-wrap: anywhere !important;
             }
         }
     </style>
@@ -636,7 +645,7 @@
         <!-- Official College Header matching Image 2 -->
         <div class="official-header">
             <div class="college-name">K. D. POLYTECHNIC, PATAN</div>
-            <div class="timetable-title">Time Table (Term: {{ $timetable['term_code'] ?? $termCode }})</div>
+            <div class="timetable-title">Time Table (Term: {{ $timetable['term_code'] ?: ($timetable['term'] ?? $term) }})</div>
             <div class="department-name">{{ $timetable['dept_full_name'] ?? $deptFullName }}</div>
         </div>
 
@@ -647,9 +656,10 @@
                 <p><strong>Semester :</strong> {{ $timetable['semester'] ?? $semester }} &nbsp;&nbsp;&nbsp; <strong>Division :</strong> {{ $timetable['division'] ?? $division }}</p>
                 <p><strong>Academic Year :</strong> {{ $timetable['academic_year'] ?? $academicYear }}</p>
             </div>
-                <p><strong>Term Dates :</strong> {{ $timetable['term_dates'] ?? $termDates }}</p>
-                <p><strong>w.e.f. :</strong> {{ $timetable['wef_date'] ?? $wefDate }}</p>
-                <p><strong>Department :</strong> {{ (stripos($deptName, 'comp') !== false) ? 'Computer Engineering' : ($deptName ?: 'Computer Engineering') }}</p>
+            <div class="meta-right">
+                <p><strong>Term Dates :</strong> {{ $timetable['term_dates'] ?: 'Not recorded' }}</p>
+                <p><strong>w.e.f. :</strong> {{ $timetable['wef_date'] ?: 'Not recorded' }}</p>
+                <p><strong>Department :</strong> {{ $deptName }}</p>
             </div>
         </div>
 
@@ -693,33 +703,52 @@
                                     if ($isLabSlot) {
                                         $batchesSeen = [];
 
-                                        // 1. Check pre-computed lab_batches from any practical session in this cell
                                         foreach ($cellSessions as $s) {
                                             $t = strtolower($s['type'] ?? '');
                                             if ((str_contains($t, 'practical') || str_contains($t, 'lab')) && !empty($s['lab_batches'])) {
                                                 foreach ($s['lab_batches'] as $lb) {
                                                     $bKey = $lb['batch'] ?? '';
-                                                    if (!isset($batchesSeen[$bKey])) {
-                                                        $batchesSeen[$bKey] = true;
-                                                        $labBatchLines[] = $lb['line'] ?? "{$lb['batch']}-{$lb['subject_code']}-{$lb['faculty_initials']}-{$lb['room']}";
+                                                    $line = $lb['line'] ?? implode('-', array_filter([
+                                                        $lb['batch'] ?? '',
+                                                        $lb['subject_code'] ?? '',
+                                                        $lb['faculty_initials'] ?? '',
+                                                        $lb['room'] ?? '',
+                                                    ], fn ($part) => $part !== ''));
+                                                    $lineKey = implode('|', [
+                                                        $bKey,
+                                                        $lb['subject_code'] ?? '',
+                                                        $lb['faculty_initials'] ?? '',
+                                                        $lb['room'] ?? '',
+                                                    ]);
+                                                    if (!isset($batchesSeen[$lineKey])) {
+                                                        $batchesSeen[$lineKey] = true;
+                                                        $labBatchLines[] = $line;
                                                     }
                                                 }
                                             }
                                         }
 
-                                        // 2. If no pre-computed lab_batches, or if multiple individual batch sessions are present
                                         if (empty($labBatchLines)) {
                                             foreach ($cellSessions as $s) {
                                                 $t = strtolower($s['type'] ?? '');
                                                 if (str_contains($t, 'practical') || str_contains($t, 'lab')) {
                                                     $bKey = $s['batch'] ?? '';
-                                                    if (!empty($bKey) && !isset($batchesSeen[$bKey])) {
-                                                        $batchesSeen[$bKey] = true;
-                                                        $rawSub = !empty($s['subject']) && strlen($s['subject']) <= 8 ? $s['subject'] : ($s['subject_code'] ?: $s['subject']);
-                                                        $bCode = strtoupper(trim(preg_replace('/\s*\(.*?\)\s*/', '', (string)$rawSub)));
-                                                        $bFac = $s['faculty_initials'] ?: ($s['faculty'] ?: 'DF');
-                                                        $bRoom = strtoupper(trim(preg_replace('/^Lab:\s*/i', '', (string)($s['room_number'] ?: $s['room']))));
-                                                        $labBatchLines[] = "{$bKey}-{$bCode}-{$bFac}-{$bRoom}";
+                                                    $rawSub = !empty($s['subject']) && strlen($s['subject']) <= 8 ? $s['subject'] : ($s['subject_code'] ?: $s['subject']);
+                                                    $bCode = strtoupper(trim(preg_replace('/\s*\(.*?\)\s*/', '', (string) $rawSub)));
+                                                    $bFac = $s['faculty_initials'] ?: '';
+                                                    $bRoom = strtoupper(trim(preg_replace('/^Lab:\s*/i', '', (string) ($s['room_number'] ?: $s['room']))));
+                                                    $lineParts = [$bKey, $bCode];
+                                                    if ($bFac !== '') {
+                                                        $lineParts[] = $bFac;
+                                                    }
+                                                    if ($bRoom !== '') {
+                                                        $lineParts[] = $bRoom;
+                                                    }
+                                                    $line = implode('-', $lineParts);
+                                                    $lineKey = implode('|', [$bKey, $bCode, $bFac, $bRoom]);
+                                                    if ($bKey !== '' && !isset($batchesSeen[$lineKey])) {
+                                                        $batchesSeen[$lineKey] = true;
+                                                        $labBatchLines[] = $line;
                                                     }
                                                 }
                                             }
@@ -730,7 +759,7 @@
                                     }
                                 @endphp
 
-                                <td rowspan="{{ $rs }}">
+                                <td data-day="{{ strtolower($day) }}" data-time-slot="{{ $slotKey }}" rowspan="{{ $rs }}">
                                     @if ($cellSessions->isEmpty())
                                         <span style="color: #666;">-</span>
                                     @elseif ($isLabSlot && !empty($labBatchLines))
@@ -738,6 +767,29 @@
                                             @foreach ($labBatchLines as $bLine)
                                                 <div class="lab-batch-line">{{ $bLine }}</div>
                                             @endforeach
+                                            <div class="session-type">(LAB)</div>
+                                        </div>
+                                    @elseif ($cellSessions->every(fn ($session) => strcasecmp($session['type'] ?? '', 'Tutorial') === 0))
+                                        @php
+                                            $sortedSessions = $cellSessions->sortBy(fn ($session) => ($session['batch'] ?? '').'|'.($session['subject_code'] ?? ''));
+                                        @endphp
+                                        <div>
+                                            @foreach ($sortedSessions as $s)
+                                                @php
+                                                    $code = strtoupper($s['subject_code'] ?: $s['subject']);
+                                                    $facultyName = trim((string) ($s['faculty'] ?? ''));
+                                                    $room = preg_replace('/^(Classroom|Lab):\s*/i', '', (string) ($s['room_number'] ?: $s['room']));
+                                                    $tutorialLine = strtoupper((string) $s['batch']).'-^'.$code;
+                                                    if ($facultyName !== '') {
+                                                        $tutorialLine .= '-'.$facultyName;
+                                                    }
+                                                    if ($room !== '') {
+                                                        $tutorialLine .= '-'.$room;
+                                                    }
+                                                @endphp
+                                                <div class="tutorial-entry-line">{{ $tutorialLine }}</div>
+                                            @endforeach
+                                            <div class="session-type">(TUTORIAL)</div>
                                         </div>
                                     @elseif ($cellSessions->count() === 1)
                                         @php
@@ -782,10 +834,26 @@
                                                     $code = $s['subject_code'] ?: $s['subject'];
                                                     $facAbbr = $s['faculty_initials'] ?: $s['faculty'];
                                                 @endphp
+                                                @if ($isTut)
+                                                    @php
+                                                        $room = preg_replace('/^(Classroom|Lab):\s*/i', '', (string) ($s['room_number'] ?: $s['room']));
+                                                        $facultyName = trim((string) ($s['faculty'] ?? ''));
+                                                        $tutorialLine = strtoupper((string) $s['batch']).'-^'.strtoupper($code);
+                                                        if ($facultyName !== '') {
+                                                            $tutorialLine .= '-'.$facultyName;
+                                                        }
+                                                        if ($room !== '') {
+                                                            $tutorialLine .= '-'.$room;
+                                                        }
+                                                    @endphp
+                                                    <div class="tutorial-entry-line">{{ $tutorialLine }}</div>
+                                                @else
                                                 <div class="batch-entry-row">
                                                     <div>
-                                                        <span class="batch-tag">{{ $s['batch'] ?: 'Batch' }}:</span>
-                                                        <span class="batch-subject">{{ $code }}@if($isTut)<sup>^</sup>@endif</span>
+                                                        @if (!empty($s['batch']))
+                                                            <span class="batch-tag">{{ $s['batch'] }}:</span>
+                                                        @endif
+                                                        <span class="batch-subject">{{ $code }}</span>
                                                         @if($facAbbr)
                                                             <span class="batch-faculty">({{ $facAbbr }})</span>
                                                         @endif
@@ -794,7 +862,11 @@
                                                         {{ $s['room_number'] ?: $s['room'] }}
                                                     </div>
                                                 </div>
+                                                @endif
                                             @endforeach
+                                            @if ($cellSessions->contains(fn ($session) => strcasecmp($session['type'] ?? '', 'Tutorial') === 0))
+                                                <div class="session-type">(TUTORIAL)</div>
+                                            @endif
                                         </div>
                                     @endif
                                 </td>
@@ -845,17 +917,21 @@
                                 $tut = (int)($sub->tutorial_credit ?? 0);
                                 $lab = (int)($sub->lab_credit ?? 0);
                                 $totalCr = $sub->credit ?? ($lec + $tut + $lab);
-                                $facName = $sub->faculty ? $sub->faculty->name : 'Department Faculty';
-                                
-                                // Compute initials
-                                $clean = trim(preg_replace('/^(Prof\.|Prof|Dr\.|Dr|Mr\.|Mr|Mrs\.|Mrs|Ms\.|Ms|Er\.|Er)\s+/i', '', $facName));
-                                $parts = preg_split('/[\s\.\-]+/', $clean, -1, PREG_SPLIT_NO_EMPTY);
-                                $abbr = '';
-                                if (!empty($parts)) {
-                                    foreach ($parts as $p) {
-                                        $abbr .= strtoupper(substr($p, 0, 1));
+                                $facultyNames = $sub->allocated_faculty_names ?: array_filter([$sub->faculty?->name]);
+                                $facName = $facultyNames ? implode(', ', $facultyNames) : '-';
+                                $abbreviations = [];
+                                foreach ($facultyNames as $facultyName) {
+                                    $clean = trim(preg_replace('/^(Prof\.|Prof|Dr\.|Dr|Mr\.|Mr|Mrs\.|Mrs|Ms\.|Ms|Er\.|Er)\s+/i', '', $facultyName));
+                                    $parts = preg_split('/[\s\.\-]+/', $clean, -1, PREG_SPLIT_NO_EMPTY);
+                                    $abbr = '';
+                                    foreach ($parts as $part) {
+                                        $abbr .= strtoupper(substr($part, 0, 1));
+                                    }
+                                    if ($abbr !== '') {
+                                        $abbreviations[] = $abbr;
                                     }
                                 }
+                                $abbr = implode(', ', array_unique($abbreviations));
                             @endphp
                             <tr>
                                 <td style="text-align: center;">{{ $idx + 1 }}</td>
@@ -876,7 +952,7 @@
             <div class="signature-block">
                 <div class="signature-line"></div>
                 <div>Time Table Coordinator</div>
-                <div style="font-size: 11px; font-weight: 600;">Department of Computer Engineering</div>
+                <div style="font-size: 11px; font-weight: 600;">{{ $deptFullName }}</div>
             </div>
             <div class="signature-block">
                 <div class="signature-line"></div>
@@ -886,7 +962,7 @@
             <div class="signature-block">
                 <div class="signature-line"></div>
                 <div>Head of Department</div>
-                <div style="font-size: 11px; font-weight: 600;">Department of Computer Engineering</div>
+                <div style="font-size: 11px; font-weight: 600;">{{ $deptFullName }}</div>
             </div>
         </div>
     </div>

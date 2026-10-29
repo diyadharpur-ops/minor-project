@@ -7,6 +7,7 @@ use App\Models\Faculty;
 use App\Models\RoomAllocation;
 use App\Models\Subject;
 use App\Models\TimetableEntry;
+use App\Models\TimetableMetadata;
 use App\Models\User;
 use App\Services\TimetableGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -547,10 +548,10 @@ test('class-wise batch filtering prevents cross-class practical and tutorial lea
     $responseA->assertSee('A3-IIOT');
     $responseA->assertSee('A4-IIOT');
     // Class A lab paired locations: A1 and A2 share F108, A3 and A4 share F102
-    $responseA->assertSee('A1-IIOT-DAL-F108');
-    $responseA->assertSee('A2-IIOT-DAL-F108');
-    $responseA->assertSee('A3-IIOT-DAL-F102');
-    $responseA->assertSee('A4-IIOT-DAL-F102');
+    expect(preg_match('/A1-IIOT-[^<]+-F108/', $responseA->getContent()))->toBe(1)
+        ->and(preg_match('/A2-IIOT-[^<]+-F108/', $responseA->getContent()))->toBe(1)
+        ->and(preg_match('/A3-IIOT-[^<]+-F102/', $responseA->getContent()))->toBe(1)
+        ->and(preg_match('/A4-IIOT-[^<]+-F102/', $responseA->getContent()))->toBe(1);
 
     // Class B batches must never appear in Class A's timetable
     $responseA->assertDontSee('B1-');
@@ -640,7 +641,7 @@ it('schedules a tutorial after earlier slots are occupied without changing its a
         ->and(TimetableEntry::query()->where('division', 'B')->count())->toBe(6);
 });
 
-it('keeps paired tutorial groups in their configured shared room at different times', function () {
+it('schedules paired tutorial groups together in their configured shared room', function () {
     $department = Department::create([
         'name' => 'Computer Science',
         'code' => 'CS',
@@ -710,7 +711,18 @@ it('keeps paired tutorial groups in their configured shared room at different ti
         ->and($entries['AT1']->classroom_id)->toBe($room->id)
         ->and($entries['AT2']->classroom_id)->toBe($room->id)
         ->and($entries['AT1']->day.'|'.$entries['AT1']->time_slot)
-        ->not->toBe($entries['AT2']->day.'|'.$entries['AT2']->time_slot);
+        ->toBe($entries['AT2']->day.'|'.$entries['AT2']->time_slot);
+
+    $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/timetable?department_id='.$department->id.'&semester=5&division=A&academic_year=2026-2027&term=Odd')
+        ->assertSuccessful()
+        ->assertSee('AT1-^ADDVC-Prof. Shah-TUTORIAL-1')
+        ->assertSee('AT2-^ADDVC-Prof. Patel-TUTORIAL-1')
+        ->assertSee('(TUTORIAL)');
 });
 
 it('renders scheduled tutorial groups in the existing session format with their allocated rooms', function () {
@@ -1041,4 +1053,286 @@ it('reports exact conflicts and preserves the prior timetable when no valid slot
             ->where('term', 'Odd')
             ->count())->toBe(1)
         ->and($existingTargetEntry->fresh()->time_slot)->toBe('10:30-11:30');
+});
+
+it('renders grouped tutorials and a continuous lab block from the selected database timetable', function () {
+    $department = Department::create([
+        'name' => 'Electrical Engineering',
+        'code' => 'EE',
+    ]);
+    $firstFaculty = Faculty::create([
+        'name' => 'Prof. Yash Raj Patel',
+        'email' => 'yash@example.com',
+        'department_id' => $department->id,
+    ]);
+    $secondFaculty = Faculty::create([
+        'name' => 'Dr. Jaya Nair Anwar',
+        'email' => 'jaya@example.com',
+        'department_id' => $department->id,
+    ]);
+    $tutorialRoom = Classroom::create([
+        'room_number' => 'F111',
+        'room_type' => 'Classroom',
+        'room_capacity' => 40,
+        'availability' => 'Available',
+    ]);
+    $laboratory = Classroom::create([
+        'room_number' => 'L101',
+        'room_type' => 'Laboratory',
+        'room_capacity' => 40,
+        'availability' => 'Available',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Advanced Data and Virtual Computing',
+        'subject_code' => 'ADDVC',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'faculty_id' => $firstFaculty->id,
+        'lecture_credit' => 1,
+        'lab_credit' => 1,
+        'tutorial_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1'],
+        'tutorial_selections' => ['AT1', 'AT2', 'AT3'],
+    ]);
+
+    foreach ([
+        ['batch' => 'AT1', 'faculty' => $firstFaculty, 'room' => $tutorialRoom],
+        ['batch' => 'AT2', 'faculty' => $secondFaculty, 'room' => $tutorialRoom],
+    ] as $tutorial) {
+        TimetableEntry::create([
+            'department_id' => $department->id,
+            'semester' => '5',
+            'division' => 'A',
+            'academic_year' => '2026-2027',
+            'term' => 'Odd',
+            'day' => 'Tuesday',
+            'time_slot' => '10:30-11:30',
+            'subject_id' => $subject->id,
+            'faculty_id' => $tutorial['faculty']->id,
+            'classroom_id' => $tutorial['room']->id,
+            'lecture_type' => 'Tutorial',
+            'activity_batch' => $tutorial['batch'],
+            'duration' => 1,
+        ]);
+    }
+
+    TimetableEntry::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'division' => 'A',
+        'academic_year' => '2026-2027',
+        'term' => 'Odd',
+        'day' => 'Tuesday',
+        'time_slot' => '11:30-12:30',
+        'subject_id' => $subject->id,
+        'faculty_id' => $secondFaculty->id,
+        'classroom_id' => $tutorialRoom->id,
+        'lecture_type' => 'Tutorial',
+        'activity_batch' => 'AT3',
+        'duration' => 1,
+    ]);
+
+    TimetableEntry::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'division' => 'A',
+        'academic_year' => '2025-2026',
+        'term' => 'Even',
+        'day' => 'Tuesday',
+        'time_slot' => '10:30-11:30',
+        'subject_id' => $subject->id,
+        'faculty_id' => $firstFaculty->id,
+        'classroom_id' => $tutorialRoom->id,
+        'lecture_type' => 'Tutorial',
+        'activity_batch' => 'AT4',
+        'duration' => 1,
+    ]);
+
+    TimetableEntry::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'division' => 'A',
+        'academic_year' => '2026-2027',
+        'term' => 'Odd',
+        'day' => 'Thursday',
+        'time_slot' => '10:30-11:30',
+        'subject_id' => $subject->id,
+        'faculty_id' => $firstFaculty->id,
+        'classroom_id' => $laboratory->id,
+        'lecture_type' => 'Practical',
+        'activity_batch' => 'A1',
+        'duration' => 2,
+    ]);
+
+    $response = $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->post('/admin/timetable', [
+        'department_id' => $department->id,
+        'semester' => '5',
+        'division' => 'A',
+        'academic_year' => '2026-2027',
+        'term' => 'Odd',
+        'term_code' => '261',
+        'term_dates' => '01/07/2026 to 31/12/2026',
+        'wef_date' => '01/07/2026',
+        'sbt_dates' => '01/10/2026 to 07/10/2026',
+    ])->assertSuccessful();
+
+    $response->assertSee('Department of Electrical Engineering')
+        ->assertSee('01/07/2026 to 31/12/2026')
+        ->assertSee('Dr. Jaya Nair Anwar')
+        ->assertSee('A1-ADDVC-Prof. Yash Raj Patel-L101');
+
+    preg_match(
+        '/<td data-day="tuesday" data-time-slot="10:30-11:30" rowspan="1">(.*?)<\/td>/s',
+        $response->getContent(),
+        $tutorialCell
+    );
+    preg_match(
+        '/<td data-day="tuesday" data-time-slot="11:30-12:30" rowspan="1">(.*?)<\/td>/s',
+        $response->getContent(),
+        $laterTutorialCell
+    );
+
+    expect($tutorialCell)->toHaveCount(2)
+        ->and($tutorialCell[1])
+        ->toContain('AT1-^ADDVC-Prof. Yash Raj Patel-F111')
+        ->toContain('AT2-^ADDVC-Dr. Jaya Nair Anwar-F111')
+        ->not->toContain('AT3-^ADDVC')
+        ->not->toContain('AT4-^ADDVC')
+        ->and($laterTutorialCell)->toHaveCount(2)
+        ->and($laterTutorialCell[1])->toContain('AT3-^ADDVC-Dr. Jaya Nair Anwar-F111')
+        ->and(TimetableMetadata::query()
+            ->where('department_id', $department->id)
+            ->where('semester', '5')
+            ->where('division', 'A')
+            ->where('academic_year', '2026-2027')
+            ->where('term', 'Odd')
+            ->value('term_dates'))->toBe('01/07/2026 to 31/12/2026')
+        ->and(substr_count($response->getContent(), 'A1-ADDVC-Prof. Yash Raj Patel-L101'))->toBe(1)
+        ->and($response->getContent())->toContain('(LAB)')
+        ->and($response->getContent())->toContain('data-day="thursday" data-time-slot="10:30-11:30" rowspan="2"');
+});
+
+it('generates all paired laboratory batches in one continuous two-hour timetable cell', function () {
+    $department = Department::create([
+        'name' => 'Electrical Engineering',
+        'code' => 'EE',
+    ]);
+    $faculties = collect([
+        'A1' => 'Prof. P J J',
+        'A2' => 'Dr. N A P',
+        'A3' => 'Mr. M R T',
+        'A4' => 'Ms. K M M',
+    ])->map(fn (string $name, string $batch): Faculty => Faculty::create([
+        'name' => $name,
+        'email' => strtolower($batch).'@example.com',
+        'department_id' => $department->id,
+    ]));
+    $laboratories = collect([
+        'F108' => Classroom::create([
+            'room_number' => 'F108',
+            'room_type' => 'Laboratory',
+            'room_capacity' => 40,
+            'availability' => 'Available',
+        ]),
+        'F102' => Classroom::create([
+            'room_number' => 'F102',
+            'room_type' => 'Laboratory',
+            'room_capacity' => 40,
+            'availability' => 'Available',
+        ]),
+    ]);
+    Division::create(['name' => 'A', 'semester' => '5', 'is_active' => true]);
+    $subject = Subject::create([
+        'name' => 'Industrial Internet of Things',
+        'subject_code' => 'IIOT',
+        'subject_type' => 'Integrated',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'faculty_id' => $faculties['A1']->id,
+        'lecture_credit' => 0,
+        'lab_credit' => 1,
+        'tutorial_credit' => 0,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1', 'A2', 'A3', 'A4'],
+        'tutorial_selections' => [],
+    ]);
+
+    foreach ([
+        'A1' => 'F108',
+        'A2' => 'F108',
+        'A3' => 'F102',
+        'A4' => 'F102',
+    ] as $batch => $roomNumber) {
+        RoomAllocation::create([
+            'department_id' => $department->id,
+            'semester' => '5',
+            'subject_id' => $subject->id,
+            'faculty_id' => $faculties[$batch]->id,
+            'classroom_id' => $laboratories[$roomNumber]->id,
+            'class_name' => 'Legacy class label',
+            'division' => null,
+            'activity_type' => 'Practical',
+            'activity_batch' => $batch,
+            'allocation_type' => 'Lab',
+            'student_count' => 20,
+            'status' => 'Allocated',
+        ]);
+    }
+
+    expect((new TimetableGenerator)->generate($department->id, '5', 'A', '2026-2027', 'Odd', false))->toBeTrue();
+
+    $entries = TimetableEntry::query()
+        ->where('department_id', $department->id)
+        ->where('semester', '5')
+        ->where('division', 'A')
+        ->where('academic_year', '2026-2027')
+        ->where('term', 'Odd')
+        ->get()
+        ->keyBy('activity_batch');
+
+    expect($entries)->toHaveCount(4)
+        ->and($entries->every(fn (TimetableEntry $entry): bool => $entry->duration === 2
+            && $entry->day === $entries['A1']->day
+            && $entry->time_slot === $entries['A1']->time_slot))->toBeTrue()
+        ->and($entries['A1']->classroom_id)->toBe($laboratories['F108']->id)
+        ->and($entries['A2']->classroom_id)->toBe($laboratories['F108']->id)
+        ->and($entries['A3']->classroom_id)->toBe($laboratories['F102']->id)
+        ->and($entries['A4']->classroom_id)->toBe($laboratories['F102']->id);
+
+    $response = $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/timetable?department_id='.$department->id.'&semester=5&division=A&academic_year=2026-2027&term=Odd')
+        ->assertSuccessful()
+        ->assertSee('A1-IIOT-Prof. P J J-F108')
+        ->assertSee('A2-IIOT-Dr. N A P-F108')
+        ->assertSee('A3-IIOT-Mr. M R T-F102')
+        ->assertSee('A4-IIOT-Ms. K M M-F102')
+        ->assertSee('(LAB)')
+        ->assertDontSee('Lab unavailable')
+        ->assertDontSee('Classroom unavailable');
+
+    $day = strtolower($entries['A1']->day);
+    $slot = preg_quote($entries['A1']->time_slot, '/');
+    preg_match(
+        '/<td data-day="'.preg_quote($day, '/').'" data-time-slot="'.$slot.'" rowspan="2">(.*?)<\/td>/s',
+        $response->getContent(),
+        $laboratoryCell
+    );
+
+    expect($laboratoryCell)->toHaveCount(2)
+        ->and($laboratoryCell[1])
+        ->toContain('A1-IIOT-Prof. P J J-F108')
+        ->toContain('A2-IIOT-Dr. N A P-F108')
+        ->toContain('A3-IIOT-Mr. M R T-F102')
+        ->toContain('A4-IIOT-Ms. K M M-F102')
+        ->toContain('(LAB)');
 });
