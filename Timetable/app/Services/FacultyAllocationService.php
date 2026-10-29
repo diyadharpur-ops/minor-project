@@ -58,7 +58,13 @@ class FacultyAllocationService
             });
 
         Subject::query()
-            ->select(['department_id', 'semester'])
+            ->select([
+                'department_id',
+                'semester',
+                'class_selections',
+                'division_selections',
+                'tutorial_selections',
+            ])
             ->whereNull('division_id')
             ->distinct()
             ->get()
@@ -77,7 +83,7 @@ class FacultyAllocationService
                     $batches->push($this->makeBatch($department, $subject->semester));
                 }
 
-                foreach (['A', 'B', 'C'] as $division) {
+                foreach ($this->classSelectionsForSubject($subject) ?: ['A', 'B', 'C'] as $division) {
                     $batches->push($this->makeBatch($department, $subject->semester, $division));
                 }
             });
@@ -302,6 +308,11 @@ class FacultyAllocationService
                         $warnings->push("No eligible faculty available for {$subject->name} in {$batch['class_name']}.");
                     }
 
+                    $simultaneousFacultyIds = [
+                        'Practical' => [],
+                        'Tutorial' => [],
+                    ];
+
                     foreach ($activityRows as $activity) {
                         if ($activity['type'] === 'Lecture' || $activity['mandatory'] || $activity['batch'] === null) {
                             $faculty = $theoryFaculty;
@@ -313,7 +324,10 @@ class FacultyAllocationService
                             $faculty = $this->selectFaculty(
                                 $batchFaculty,
                                 $subject,
-                                $theoryFaculty ? [$theoryFaculty->id] : [],
+                                array_values(array_unique([
+                                    ...($theoryFaculty ? [$theoryFaculty->id] : []),
+                                    ...($simultaneousFacultyIds[$activity['type']] ?? []),
+                                ])),
                                 $activity['hours'],
                                 $hoursByFaculty,
                                 $overloadedFacultyIds,
@@ -346,6 +360,9 @@ class FacultyAllocationService
 
                         if ($faculty) {
                             $hoursByFaculty[$faculty->id] = ($hoursByFaculty[$faculty->id] ?? 0) + $activity['hours'];
+                            if (isset($simultaneousFacultyIds[$activity['type']])) {
+                                $simultaneousFacultyIds[$activity['type']][] = $faculty->id;
+                            }
                             if (($hoursByFaculty[$faculty->id] ?? 0) > $normalThreshold) {
                                 $warnings->push(
                                     "Mandatory assignments exceed the configured workload limit for {$faculty->name} ({$subject->name}, {$batch['class_name']})."
@@ -763,6 +780,24 @@ class FacultyAllocationService
         }
 
         return $batches->values();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function classSelectionsForSubject(Subject $subject): array
+    {
+        return collect([
+            ...($subject->class_selections ?? []),
+            ...($subject->division_selections ?? []),
+            ...($subject->tutorial_selections ?? []),
+        ])
+            ->filter(fn (mixed $selection): bool => is_string($selection) && $selection !== '')
+            ->map(fn (string $selection): string => strtoupper($selection[0]))
+            ->filter(fn (string $class): bool => preg_match('/^[A-Z]$/', $class) === 1)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function roomFor(Subject $subject): ?Classroom

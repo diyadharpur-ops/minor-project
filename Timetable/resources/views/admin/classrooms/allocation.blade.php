@@ -289,60 +289,6 @@
     </form>
 </div>
 
-@if ($selectedDepartmentId > 0 && $selectedSemester !== '' && $selectedClass !== '')
-    <div class="filter-card">
-        <h2>Configure Division Lab Sharing</h2>
-        <p style="color:#6b7280; margin-top:-8px;">Choose divisions saved for this class in Manage Subjects and assign their shared lab. Keep practical batch pairs in one group.</p>
-        <form method="POST" action="/admin/classroom-allocation" id="labGroupForm">
-            @csrf
-            <input type="hidden" name="form_type" value="save-lab-group">
-            <input type="hidden" name="department_id" value="{{ $selectedDepartmentId }}">
-            <input type="hidden" name="semester" value="{{ $selectedSemester }}">
-            <input type="hidden" name="class_name" value="{{ $selectedClass }}">
-            <div class="filter-row">
-                <div class="filter-group">
-                    <label>Group Name</label>
-                    <input type="text" name="group_name" maxlength="80" required placeholder="Example: Group 1">
-                </div>
-                <div class="filter-group">
-                    <label>Divisions</label>
-                    <select name="divisions[]" multiple required size="4">
-                        @foreach ($selectedDivisions as $divisionName)
-                            <option value="{{ $divisionName }}">{{ $divisionName }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Available Lab</label>
-                    <select name="classroom_id" required>
-                        <option value="">Select Lab</option>
-                        @foreach ($availableLabs as $lab)
-                            <option value="{{ $lab->id }}">{{ $lab->room_number }} (Capacity: {{ $lab->room_capacity }})</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div>
-                    <button type="submit" class="btn-generate">Save Lab Group</button>
-                </div>
-            </div>
-        </form>
-        @if ($labGroups->isNotEmpty())
-            <div style="margin-top:16px;">
-                <strong>Configured groups</strong>
-                @foreach ($labGroups as $group)
-                    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #e5e7eb;">
-                        <span>{{ $group->group_name }}: {{ implode(', ', $group->divisions ?? []) }} → {{ $group->classroom?->room_number ?? 'Lab unavailable' }}</span>
-                        <form method="POST" action="/admin/classroom-allocation/lab-groups/{{ $group->id }}/delete" onsubmit="return confirm('Remove this lab sharing group?');">
-                            @csrf
-                            <button type="submit" class="btn btn-danger">Remove</button>
-                        </form>
-                    </div>
-                @endforeach
-            </div>
-        @endif
-    </div>
-@endif
-
 <script>
     const classesMap = @json($classesMap ?? []);
     const semestersMap = @json($semestersMap ?? []);
@@ -524,34 +470,6 @@
             });
         }
 
-        const labGroupForm = document.getElementById('labGroupForm');
-        if (labGroupForm) {
-            labGroupForm.addEventListener('submit', function (event) {
-                const divisionsSelect = labGroupForm.querySelector('select[name="divisions[]"]');
-                const configuredDivisions = Array.from(divisionsSelect.options).map(function (option) {
-                    return option.value;
-                });
-                const selectedDivisions = Array.from(divisionsSelect.selectedOptions).map(function (option) {
-                    return option.value;
-                });
-
-                for (const selectedDivision of selectedDivisions) {
-                    const match = selectedDivision.match(/^(.*?)([1-4])$/);
-                    if (!match) {
-                        continue;
-                    }
-
-                    const pairStart = Number(match[2]) <= 2 ? 1 : 3;
-                    const pairedNumber = Number(match[2]) === pairStart ? pairStart + 1 : pairStart;
-                    const pairedDivision = match[1] + pairedNumber;
-                    if (configuredDivisions.includes(pairedDivision) && !selectedDivisions.includes(pairedDivision)) {
-                        event.preventDefault();
-                        window.alert(selectedDivision + ' and ' + pairedDivision + ' must be included in the same lab group.');
-                        return;
-                    }
-                }
-            });
-        }
         updateResultFilters();
     });
 </script>

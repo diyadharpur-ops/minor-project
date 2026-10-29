@@ -777,11 +777,11 @@
                                             @foreach ($sortedSessions as $s)
                                                 @php
                                                     $code = strtoupper($s['subject_code'] ?: $s['subject']);
-                                                    $facultyName = trim((string) ($s['faculty'] ?? ''));
+                                                    $facultyInitials = trim((string) ($s['faculty_initials'] ?? ''));
                                                     $room = preg_replace('/^(Classroom|Lab):\s*/i', '', (string) ($s['room_number'] ?: $s['room']));
                                                     $tutorialLine = strtoupper((string) $s['batch']).'-^'.$code;
-                                                    if ($facultyName !== '') {
-                                                        $tutorialLine .= '-'.$facultyName;
+                                                    if ($facultyInitials !== '') {
+                                                        $tutorialLine .= '-'.$facultyInitials;
                                                     }
                                                     if ($room !== '') {
                                                         $tutorialLine .= '-'.$room;
@@ -795,26 +795,21 @@
                                         @php
                                             $s = $cellSessions->first();
                                             $isTut = strcasecmp($s['type'] ?? '', 'Tutorial') === 0;
-                                            $code = $s['subject_code'] ?: $s['subject'];
+                                            $code = strtoupper($s['subject_code'] ?: $s['subject']);
+                                            $facultyInitials = trim((string) ($s['faculty_initials'] ?? ''));
+                                            $room = preg_replace('/^(Classroom|Lab):\s*/i', '', (string) ($s['room_number'] ?: $s['room']));
+                                            $sessionLine = $code.($isTut ? '^' : '');
+                                            if ($facultyInitials !== '') {
+                                                $sessionLine .= '-'.$facultyInitials;
+                                            }
+                                            if ($room !== '') {
+                                                $sessionLine .= '-'.$room;
+                                            }
                                         @endphp
                                         <div class="session-block">
                                             <div class="session-code">
-                                                {{ strtoupper($code) }}@if($isTut)<sup>^</sup>@endif
+                                                {{ $sessionLine }}
                                             </div>
-                                            @if(!empty($s['subject']) && $s['subject'] !== $code)
-                                                <div class="session-sub-name">{{ $s['subject'] }}</div>
-                                            @endif
-                                            @if(!empty($s['faculty']))
-                                                <div class="session-faculty">
-                                                    {{ $s['faculty'] }}
-                                                    @if(!empty($s['faculty_initials']))
-                                                        ({{ $s['faculty_initials'] }})
-                                                    @endif
-                                                </div>
-                                            @endif
-                                            @if(!empty($s['room']))
-                                                <div class="session-location">{{ $s['room'] }}</div>
-                                            @endif
                                             <div class="session-type">
                                                 ({{ strtoupper($s['type']) }}{{ !empty($s['batch']) ? ' - '.strtoupper($s['batch']) : '' }})
                                             </div>
@@ -832,15 +827,15 @@
                                                 @php
                                                     $isTut = strcasecmp($s['type'] ?? '', 'Tutorial') === 0;
                                                     $code = $s['subject_code'] ?: $s['subject'];
-                                                    $facAbbr = $s['faculty_initials'] ?: $s['faculty'];
+                                                    $facAbbr = $s['faculty_initials'] ?? '';
                                                 @endphp
                                                 @if ($isTut)
                                                     @php
                                                         $room = preg_replace('/^(Classroom|Lab):\s*/i', '', (string) ($s['room_number'] ?: $s['room']));
-                                                        $facultyName = trim((string) ($s['faculty'] ?? ''));
+                                                        $facultyInitials = trim((string) ($s['faculty_initials'] ?? ''));
                                                         $tutorialLine = strtoupper((string) $s['batch']).'-^'.strtoupper($code);
-                                                        if ($facultyName !== '') {
-                                                            $tutorialLine .= '-'.$facultyName;
+                                                        if ($facultyInitials !== '') {
+                                                            $tutorialLine .= '-'.$facultyInitials;
                                                         }
                                                         if ($room !== '') {
                                                             $tutorialLine .= '-'.$room;
@@ -917,7 +912,7 @@
                                 $tut = (int)($sub->tutorial_credit ?? 0);
                                 $lab = (int)($sub->lab_credit ?? 0);
                                 $totalCr = $sub->credit ?? ($lec + $tut + $lab);
-                                $facultyNames = $sub->allocated_faculty_names ?: array_filter([$sub->faculty?->name]);
+                                $facultyNames = $sub->allocated_faculty_names ?? [];
                                 $facName = $facultyNames ? implode(', ', $facultyNames) : '-';
                                 $abbreviations = [];
                                 foreach ($facultyNames as $facultyName) {

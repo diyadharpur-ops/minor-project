@@ -23,9 +23,16 @@ class Division extends Model
     public static function getActiveDivisionsForSemester($semester): array
     {
         $divisions = static::where('semester', (string) $semester)->get();
-        $defaultNames = ['A', 'B', 'C'];
+        $subjectClasses = Subject::query()
+            ->where('semester', (string) $semester)
+            ->get(['class_selections', 'division_selections', 'tutorial_selections'])
+            ->flatMap(fn (Subject $subject): array => $subject->effective_class_selections)
+            ->unique()
+            ->values()
+            ->all();
+        $defaultNames = array_values(array_unique(['A', 'B', 'C', ...$subjectClasses]));
         $existing = $divisions->keyBy('name');
-        
+
         $active = [];
         foreach ($defaultNames as $name) {
             if ($existing->has($name)) {
@@ -36,19 +43,20 @@ class Division extends Model
                 $active[] = $name;
             }
         }
-        
+
         foreach ($divisions as $div) {
-            if (!in_array($div->name, $defaultNames) && (bool) $div->is_active) {
+            if (! in_array($div->name, $defaultNames) && (bool) $div->is_active) {
                 $active[] = $div->name;
             }
         }
 
         if (empty($active)) {
             $allForSem = $divisions->pluck('name')->toArray();
-            $active = !empty($allForSem) ? $allForSem : ['A', 'B'];
+            $active = ! empty($allForSem) ? $allForSem : ['A', 'B'];
         }
-        
+
         sort($active, SORT_NATURAL);
+
         return array_values($active);
     }
 
@@ -67,13 +75,27 @@ class Division extends Model
                 ->values();
         }
 
-        $allDbDivisions = static::all()->groupBy(fn($d) => (string) $d->semester);
-        $defaultNames = ['A', 'B', 'C'];
+        $allDbDivisions = static::all()->groupBy(fn ($division) => (string) $division->semester);
+        $subjectClassesBySemester = Subject::query()
+            ->whereIn('semester', collect($semesters)->map(fn ($semester): string => (string) $semester)->all())
+            ->get(['semester', 'class_selections', 'division_selections', 'tutorial_selections'])
+            ->groupBy(fn (Subject $subject): string => (string) $subject->semester)
+            ->map(fn ($subjects): array => $subjects
+                ->flatMap(fn (Subject $subject): array => $subject->effective_class_selections)
+                ->unique()
+                ->values()
+                ->all());
         $map = [];
 
         foreach ($semesters as $sem) {
             $semStr = (string) $sem;
             $semDivs = $allDbDivisions->get($semStr, collect())->keyBy('name');
+            $defaultNames = array_values(array_unique([
+                'A',
+                'B',
+                'C',
+                ...($subjectClassesBySemester->get($semStr, [])),
+            ]));
             $active = [];
             foreach ($defaultNames as $name) {
                 if ($semDivs->has($name)) {
@@ -85,13 +107,13 @@ class Division extends Model
                 }
             }
             foreach ($allDbDivisions->get($semStr, collect()) as $div) {
-                if (!in_array($div->name, $defaultNames) && (bool) $div->is_active) {
+                if (! in_array($div->name, $defaultNames) && (bool) $div->is_active) {
                     $active[] = $div->name;
                 }
             }
             if (empty($active)) {
                 $allForSem = $allDbDivisions->get($semStr, collect())->pluck('name')->toArray();
-                $active = !empty($allForSem) ? $allForSem : ['A', 'B'];
+                $active = ! empty($allForSem) ? $allForSem : ['A', 'B'];
             }
             sort($active, SORT_NATURAL);
             $map[$semStr] = array_values($active);
@@ -107,7 +129,7 @@ class Division extends Model
     {
         $map = static::getDivisionsMap($semesters);
         $all = collect($map)->flatten()->unique()->sort()->values()->toArray();
-        return !empty($all) ? $all : ['A', 'B'];
-    }
 
+        return ! empty($all) ? $all : ['A', 'B'];
+    }
 }

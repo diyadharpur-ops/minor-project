@@ -50,7 +50,6 @@ class TimetableGenerator
             $allocateFaculty
         ): bool {
             DB::table('faculties')
-                ->where('department_id', $deptId)
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get(['id']);
@@ -136,8 +135,6 @@ class TimetableGenerator
         if ($subjects->isEmpty()) {
             return false;
         }
-
-        $allFaculty = Faculty::where('department_id', $deptId)->get();
 
         $className = $department->name.'-'.$semester.'-'.$division;
 
@@ -269,9 +266,6 @@ class TimetableGenerator
                         return $sharedAllocation;
                     }
 
-                    if ($ownAllocation) {
-                        return $ownAllocation;
-                    }
                 }
             }
 
@@ -326,26 +320,24 @@ class TimetableGenerator
             }
 
             $activityAllocation = $findActivityAllocation($subject, $type, $batch);
+            $legacyAllocation = $findLegacyAllocation($subject, $type, $batch);
             if ($activityAllocation?->classroom_id) {
                 return $activityAllocation;
             }
 
-            return $findLegacyAllocation($subject, $type, $batch);
+            return $legacyAllocation?->classroom_id
+                ? $legacyAllocation
+                : ($activityAllocation ?? $legacyAllocation);
         };
-        $getTheoryFaculty = function (Subject $subject) use ($findActivityAllocation, $findLegacyAllocation, $allFaculty): ?Faculty {
+        $getTheoryFaculty = function (Subject $subject) use ($findActivityAllocation, $findLegacyAllocation): ?Faculty {
             $allocation = $findActivityAllocation($subject, 'Lecture', null)
                 ?? $findLegacyAllocation($subject, 'Lecture');
 
-            return $allocation?->faculty
-                ?? $findLegacyAllocation($subject, 'Lecture')?->faculty
-                ?? $subject->faculty
-                ?? $allFaculty->first(fn (Faculty $faculty): bool => filled($subject->faculty_name)
-                    && mb_stripos($faculty->name, (string) $subject->faculty_name) !== false);
+            return $allocation?->faculty;
         };
         $getActivityFaculty = function (Subject $subject, string $type, ?string $batch, ?Faculty $theoryFaculty) use (
             $findActivityAllocation,
-            $findLegacyAllocation,
-            $allFaculty
+            $findLegacyAllocation
         ): ?Faculty {
             $allocation = $findActivityAllocation($subject, $type, $batch);
             if ($allocation) {
@@ -361,7 +353,7 @@ class TimetableGenerator
                 return $theoryFaculty;
             }
 
-            return $allFaculty->first(fn (Faculty $faculty): bool => $faculty->id === $subject->faculty_id);
+            return null;
         };
 
         // Create Blocks
@@ -377,14 +369,6 @@ class TimetableGenerator
             $tutorialBatches = collect($subject->tutorial_selections ?? [])
                 ->filter(fn (string $batch): bool => str_starts_with($batch, $division))
                 ->values();
-            $labFacultyCount = $labBatches
-                ->map(fn (string $batch): ?int => $getActivityFaculty($subject, 'Practical', $batch, $theoryFaculty)?->id)
-                ->filter()
-                ->unique()
-                ->count();
-            $scheduleLabBatchesTogether = $labBatches->count() > 1
-                && $labFacultyCount === $labBatches->count();
-
             // Fallback for older data without detailed credits
             if ($lectureCount === 0 && $labBatches->isEmpty() && $tutorialBatches->isEmpty() && ($subject->credit ?? 0) > 0) {
                 $isPracticalSubject = stripos($subject->subject_type ?? '', 'practical') !== false || stripos($subject->subject_type ?? '', 'lab') !== false;
@@ -445,9 +429,7 @@ class TimetableGenerator
                         'type' => 'Practical',
                         'batch' => $labBatch,
                         'duration' => 2,
-                        'schedule_group' => $scheduleLabBatchesTogether
-                            ? 'practical:'.$subject->id.':'.$i
-                            : null,
+                        'schedule_group' => 'practical:'.$subject->id.':'.$i,
                         'room_share_group' => $this->pairedBatchGroupKey($subject, 'Practical', $labBatch, $i),
                         'subject' => $subject,
                         'faculty' => $getActivityFaculty($subject, 'Practical', $labBatch, $theoryFaculty),
@@ -458,29 +440,33 @@ class TimetableGenerator
 
             foreach ($tutorialBatches as $tutorialBatch) {
                 for ($i = 0; $i < (int) ($subject->tutorial_credit ?? 0); $i++) {
-                    $tutorialPairKey = $this->pairedBatchGroupKey($subject, 'Tutorial', $tutorialBatch, $i);
-                    $tutorialPair = $this->pairedTutorialBatches($tutorialBatch);
-                    if ($tutorialPairKey !== null && $tutorialPair !== null) {
-                        $partnerBatch = $tutorialPair[0] === $tutorialBatch ? $tutorialPair[1] : $tutorialPair[0];
-                        $faculty = $getActivityFaculty($subject, 'Tutorial', $tutorialBatch, $theoryFaculty);
-                        $partnerFaculty = $getActivityFaculty($subject, 'Tutorial', $partnerBatch, $theoryFaculty);
-                        if ($faculty?->id === $partnerFaculty?->id) {
-                            $tutorialPairKey = null;
-                        }
-                    }
+                    $tutorialSessionGroup = 'tutorial:'.$subject->id.':'.$i;
 
                     $blocks->push((object) [
                         'type' => 'Tutorial',
                         'batch' => $tutorialBatch,
                         'duration' => 1,
-                        'schedule_group' => $tutorialPairKey,
-                        'room_share_group' => $tutorialPairKey,
+                        'schedule_group' => $tutorialSessionGroup,
+                        'room_share_group' => $tutorialSessionGroup,
                         'subject' => $subject,
                         'faculty' => $getActivityFaculty($subject, 'Tutorial', $tutorialBatch, $theoryFaculty),
                         'allocation' => $findRoomAllocation($subject, 'Tutorial', $tutorialBatch),
                     ]);
                 }
             }
+        }
+
+        $unallocatedBlock = $blocks->first(fn ($block): bool => $block->type === 'Practical'
+            && $block->allocation?->status === 'Unallocated');
+        if ($unallocatedBlock) {
+            $batchLabel = $unallocatedBlock->batch ? " {$unallocatedBlock->batch}" : '';
+            $reason = filled($unallocatedBlock->allocation->notes)
+                ? (string) $unallocatedBlock->allocation->notes
+                : 'No suitable laboratory has been allocated.';
+
+            throw new Exception(
+                "Cannot generate Practical{$batchLabel} for {$unallocatedBlock->subject->name}: {$reason}"
+            );
         }
 
         $unassignedBlock = $blocks->first(fn ($block): bool => ! $block->faculty);
@@ -877,21 +863,15 @@ class TimetableGenerator
         $capacity = (int) ($allocation?->student_count ?? 0);
 
         if ($allocation && ! $allocation->classroom_id) {
-            $options = $classrooms
-                ->filter(fn (Classroom $room): bool => ($isLab
-                    ? str_contains(strtolower((string) $room->room_type), 'lab')
-                    : ! str_contains(strtolower((string) $room->room_type), 'lab'))
-                    && (int) $room->room_capacity >= $capacity)
-                ->map(fn (Classroom $room): array => [
-                    'room_id' => (int) $room->id,
-                    'second_room_id' => null,
-                    'room_number' => (string) $room->room_number,
-                    'notes' => null,
-                ])
-                ->values()
-                ->all();
+            if ($allocation->status === 'Unallocated') {
+                $reason = filled($allocation->notes)
+                    ? (string) $allocation->notes
+                    : 'The room allocation is marked unallocated.';
 
-            return [$options, $options === [] ? ['No available classroom of the required room type and capacity exists.'] : []];
+                return [[], [$reason]];
+            }
+
+            return [[], ['No room is assigned to this activity in the allocation records.']];
         }
 
         if ($allocation) {
@@ -927,20 +907,7 @@ class TimetableGenerator
             ]], []];
         }
 
-        $options = $classrooms
-            ->filter(fn (Classroom $room): bool => $isLab
-                ? str_contains(strtolower((string) $room->room_type), 'lab')
-                : ! str_contains(strtolower((string) $room->room_type), 'lab'))
-            ->map(fn (Classroom $room): array => [
-                'room_id' => (int) $room->id,
-                'second_room_id' => null,
-                'room_number' => (string) $room->room_number,
-                'notes' => null,
-            ])
-            ->values()
-            ->all();
-
-        return [$options, $options === [] ? ['No available classroom of the required room type exists.'] : []];
+        return [[], ['No room allocation exists for this activity.']];
     }
 
     /**
@@ -1267,11 +1234,11 @@ class TimetableGenerator
      */
     private function pairedPracticalBatches(string $batch): ?array
     {
-        if (preg_match('/^(.*?)([1-4])$/', $batch, $matches) !== 1) {
+        if (preg_match('/^(.*?)([1-9][0-9]*)$/', $batch, $matches) !== 1) {
             return null;
         }
 
-        $pairStart = (int) $matches[2] <= 2 ? 1 : 3;
+        $pairStart = intdiv((int) $matches[2] - 1, 2) * 2 + 1;
 
         return [
             $matches[1].$pairStart,
@@ -1284,11 +1251,11 @@ class TimetableGenerator
      */
     private function pairedTutorialBatches(string $batch): ?array
     {
-        if (preg_match('/^(.*?T?)([1-4])$/i', $batch, $matches) !== 1) {
+        if (preg_match('/^(.*?T?)([1-9][0-9]*)$/i', $batch, $matches) !== 1) {
             return null;
         }
 
-        $pairStart = (int) $matches[2] <= 2 ? 1 : 3;
+        $pairStart = intdiv((int) $matches[2] - 1, 2) * 2 + 1;
 
         return [
             $matches[1].$pairStart,

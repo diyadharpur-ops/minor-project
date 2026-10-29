@@ -56,7 +56,7 @@ class Subject extends Model
             ...($this->tutorial_selections ?? []),
         ])
             ->map(fn (string $selection): string => $selection[0])
-            ->filter(fn (string $class): bool => in_array($class, ['A', 'B', 'C'], true))
+            ->filter(fn (string $class): bool => preg_match('/^[A-Z]$/', $class) === 1)
             ->unique()
             ->values();
 
@@ -66,7 +66,7 @@ class Subject extends Model
 
         $legacyClass = $this->division?->name;
 
-        return in_array($legacyClass, ['A', 'B', 'C'], true) ? [$legacyClass] : [];
+        return preg_match('/^[A-Z]$/', (string) $legacyClass) === 1 ? [$legacyClass] : [];
     }
 
     public function getTotalLectureCreditsAttribute(): int

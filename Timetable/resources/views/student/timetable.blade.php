@@ -434,7 +434,7 @@
                                                         $batchesSeen[$bKey] = true;
                                                         $rawSub = !empty($s['subject']) && strlen($s['subject']) <= 8 ? $s['subject'] : ($s['subject_code'] ?: $s['subject']);
                                                         $bCode = strtoupper(trim(preg_replace('/\s*\(.*?\)\s*/', '', (string)$rawSub)));
-                                                        $bFac = $s['faculty_initials'] ?: ($s['faculty'] ?: 'DF');
+                                                        $bFac = $s['faculty_initials'] ?? '';
                                                         $bRoom = strtoupper(trim(preg_replace('/^Lab:\s*/i', '', (string)($s['room_number'] ?: $s['room']))));
                                                         $labBatchLines[] = "{$bKey}-{$bCode}-{$bFac}-{$bRoom}";
                                                     }
@@ -459,18 +459,21 @@
                                         @php
                                             $s = $cellSessions->first();
                                             $isTut = strcasecmp($s['type'] ?? '', 'Tutorial') === 0;
-                                            $code = $s['subject_code'] ?: $s['subject'];
+                                            $code = strtoupper($s['subject_code'] ?: $s['subject']);
+                                            $facultyInitials = trim((string) ($s['faculty_initials'] ?? ''));
+                                            $room = preg_replace('/^(Classroom|Lab):\s*/i', '', (string) ($s['room_number'] ?: $s['room']));
+                                            $sessionLine = $code.($isTut ? '^' : '');
+                                            if ($facultyInitials !== '') {
+                                                $sessionLine .= '-'.$facultyInitials;
+                                            }
+                                            if ($room !== '') {
+                                                $sessionLine .= '-'.$room;
+                                            }
                                         @endphp
                                         <div>
                                             <div class="session-code">
-                                                {{ strtoupper($code) }}@if($isTut)<sup>^</sup>@endif
+                                                {{ $sessionLine }}
                                             </div>
-                                            @if(!empty($s['faculty']))
-                                                <div class="session-faculty">{{ $s['faculty'] }}</div>
-                                            @endif
-                                            @if(!empty($s['room']))
-                                                <div class="session-location">{{ $s['room'] }}</div>
-                                            @endif
                                             <div class="session-type">
                                                 ({{ strtoupper($s['type']) }}{{ !empty($s['batch']) ? ' - '.strtoupper($s['batch']) : '' }})
                                             </div>
@@ -480,15 +483,19 @@
                                             @foreach ($cellSessions->sortBy('batch') as $s)
                                                 @php
                                                     $isTut = strcasecmp($s['type'] ?? '', 'Tutorial') === 0;
-                                                    $code = $s['subject_code'] ?: $s['subject'];
+                                                    $code = strtoupper($s['subject_code'] ?: $s['subject']);
+                                                    $facultyInitials = trim((string) ($s['faculty_initials'] ?? ''));
+                                                    $room = preg_replace('/^(Classroom|Lab):\s*/i', '', (string) ($s['room_number'] ?: $s['room']));
+                                                    $sessionLine = $code.($isTut ? '^' : '');
+                                                    if ($facultyInitials !== '') {
+                                                        $sessionLine .= '-'.$facultyInitials;
+                                                    }
+                                                    if ($room !== '') {
+                                                        $sessionLine .= '-'.$room;
+                                                    }
                                                 @endphp
                                                 <div class="batch-entry-row">
-                                                    <div>
-                                                        <span class="batch-tag">{{ $s['batch'] ?: 'Batch' }}:</span>
-                                                        <span>{{ $code }}@if($isTut)<sup>^</sup>@endif</span>
-                                                        <span>({{ $s['faculty_initials'] ?: $s['faculty'] }})</span>
-                                                    </div>
-                                                    <div>{{ $s['room_number'] ?: $s['room'] }}</div>
+                                                    <div>{{ $s['batch'] ? strtoupper($s['batch']).'-' : '' }}{{ $sessionLine }}</div>
                                                 </div>
                                             @endforeach
                                         </div>
@@ -542,7 +549,7 @@
                                 <td>{{ $sub->name }}</td>
                                 <td style="text-align: center;">{{ $lec }} - {{ $tut }} - {{ $lab * 2 }}</td>
                                 <td style="text-align: center; font-weight: 700;">{{ $totalCr }}</td>
-                                <td>{{ $sub->faculty ? $sub->faculty->name : 'Department Faculty' }}</td>
+                                <td>{{ implode(', ', $sub->allocated_faculty_names ?? []) ?: '-' }}</td>
                             </tr>
                         @endforeach
                     </tbody>

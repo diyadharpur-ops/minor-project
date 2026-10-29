@@ -4,6 +4,8 @@ use App\Models\Classroom;
 use App\Models\Department;
 use App\Models\RoomAllocation;
 use App\Models\Subject;
+use App\Services\ClassroomAllocationService;
+use App\Services\FacultyAllocationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -47,7 +49,9 @@ test('admin classroom allocation page loads without demo data', function () {
         ->assertOk()
         ->assertSee('Classroom & Lab Allocation')
         ->assertSee('Allocation Results')
-        ->assertSee('No allocation records found. Click Auto Generate to start.');
+        ->assertSee('No allocation records found. Click Auto Generate to start.')
+        ->assertDontSee('Configure Division Lab Sharing')
+        ->assertDontSee('Save Lab Group');
 
     $response = $this->withSession([
         'admin.auth' => [
@@ -305,6 +309,129 @@ test('unconfigured practical batches automatically share one lab per paired grou
         ->and($allocations['A1']->classroom_id)->toBe($allocations['A2']->classroom_id)
         ->and($allocations['A3']->classroom_id)->toBe($allocations['A4']->classroom_id)
         ->and($allocations['A1']->classroom_id)->not->toBe($allocations['A3']->classroom_id);
+});
+
+test('auto allocation keeps one classroom per class and distinct paired labs across classes after regeneration', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+
+    foreach ([
+        ['room_number' => 'ROOM-A', 'room_type' => 'Classroom'],
+        ['room_number' => 'ROOM-B', 'room_type' => 'Classroom'],
+        ['room_number' => 'LAB-A1', 'room_type' => 'Lab'],
+        ['room_number' => 'LAB-A2', 'room_type' => 'Lab'],
+        ['room_number' => 'LAB-B1', 'room_type' => 'Lab'],
+        ['room_number' => 'LAB-B2', 'room_type' => 'Lab'],
+    ] as $room) {
+        Classroom::create([
+            ...$room,
+            'room_capacity' => 80,
+            'availability' => 'Available',
+        ]);
+    }
+
+    Subject::create([
+        'name' => 'Shared Class Subject',
+        'subject_code' => 'SHARED-501',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'subject_type' => 'Integrated',
+        'lecture_credit' => 1,
+        'tutorial_credit' => 1,
+        'lab_credit' => 1,
+        'class_selections' => ['A', 'B'],
+        'division_selections' => ['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', 'B4'],
+        'tutorial_selections' => ['AT1', 'BT1'],
+    ]);
+    Subject::create([
+        'name' => 'D Class Practical',
+        'subject_code' => 'D-501',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'subject_type' => 'Practical',
+        'lab_credit' => 1,
+        'class_selections' => ['D'],
+        'division_selections' => ['D1', 'D2', 'D3', 'D4'],
+        'tutorial_selections' => [],
+    ]);
+
+    $service = new ClassroomAllocationService(new FacultyAllocationService);
+    $firstRun = $service->generateAll();
+    $firstRunCount = RoomAllocation::count();
+
+    $classroomAllocations = RoomAllocation::query()
+        ->where('allocation_type', 'Classroom')
+        ->get()
+        ->groupBy('class_name');
+    $labAllocations = RoomAllocation::query()
+        ->where('allocation_type', 'Lab')
+        ->get()
+        ->groupBy('class_name');
+
+    expect($firstRun['unallocated'])->toBe(0)
+        ->and($classroomAllocations['A']->pluck('classroom_id')->unique()->count())->toBe(1)
+        ->and($classroomAllocations['B']->pluck('classroom_id')->unique()->count())->toBe(1)
+        ->and($classroomAllocations['A']->first()->classroom_id)->not->toBe($classroomAllocations['B']->first()->classroom_id)
+        ->and($labAllocations['A']->whereIn('division', ['A1', 'A2'])->pluck('classroom_id')->unique()->count())->toBe(1)
+        ->and($labAllocations['A']->whereIn('division', ['A3', 'A4'])->pluck('classroom_id')->unique()->count())->toBe(1)
+        ->and($labAllocations['A']->whereIn('division', ['A1', 'A2'])->first()->classroom_id)
+        ->not->toBe($labAllocations['A']->whereIn('division', ['A3', 'A4'])->first()->classroom_id)
+        ->and($labAllocations['B']->whereIn('division', ['B1', 'B2'])->pluck('classroom_id')->unique()->count())->toBe(1)
+        ->and($labAllocations['B']->whereIn('division', ['B3', 'B4'])->pluck('classroom_id')->unique()->count())->toBe(1)
+        ->and($labAllocations['B']->whereIn('division', ['B1', 'B2'])->first()->classroom_id)
+        ->not->toBe($labAllocations['B']->whereIn('division', ['B3', 'B4'])->first()->classroom_id)
+        ->and($labAllocations['A']->pluck('classroom_id')->unique()->intersect($labAllocations['B']->pluck('classroom_id')->unique()))
+        ->toBeEmpty()
+        ->and($service->classesForSelection($department->id, '5'))->toBe(['A', 'B', 'D'])
+        ->and($labAllocations['D']->whereIn('division', ['D1', 'D2'])->pluck('classroom_id')->unique()->count())->toBe(1)
+        ->and($labAllocations['D']->whereIn('division', ['D3', 'D4'])->pluck('classroom_id')->unique()->count())->toBe(1)
+        ->and($labAllocations['D']->whereIn('division', ['D1', 'D2'])->first()->classroom_id)
+        ->not->toBe($labAllocations['D']->whereIn('division', ['D3', 'D4'])->first()->classroom_id);
+
+    $secondRun = $service->generateAll();
+
+    expect($secondRun['unallocated'])->toBe(0)
+        ->and(RoomAllocation::count())->toBe($firstRunCount)
+        ->and($service->classesForSelection($department->id, '5'))->toBe(['A', 'B', 'D']);
+});
+
+test('auto allocation reports each practical pair when no suitable labs exist', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    Classroom::create([
+        'room_number' => 'ROOM-A',
+        'room_capacity' => 80,
+        'room_type' => 'Classroom',
+        'availability' => 'Available',
+    ]);
+    Subject::create([
+        'name' => 'Practical Without Lab',
+        'subject_code' => 'NO-LAB-501',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'subject_type' => 'Practical',
+        'lab_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1', 'A2', 'A3', 'A4'],
+        'tutorial_selections' => [],
+    ]);
+
+    $result = (new ClassroomAllocationService(new FacultyAllocationService))->generateAll();
+    $allocations = RoomAllocation::query()
+        ->where('allocation_type', 'Lab')
+        ->get();
+
+    expect($result['unallocated'])->toBe(4)
+        ->and(implode(' ', $result['issues']))->toContain('A1/A2')
+        ->and(implode(' ', $result['issues']))->toContain('A3/A4')
+        ->and($allocations)->toHaveCount(4)
+        ->and($allocations->every(fn (RoomAllocation $allocation): bool => $allocation->status === 'Unallocated'
+            && $allocation->classroom_id === null
+            && str_contains((string) $allocation->notes, 'No available lab')))->toBeTrue();
 });
 
 test('allocation results display one existing lab for each practical batch pair', function () {
