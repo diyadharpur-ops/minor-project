@@ -330,28 +330,6 @@
             padding: 2px 0;
         }
 
-        .tutorial-entry-line {
-            padding: 2px 0;
-            font-size: 11.5px;
-            font-weight: 700;
-            line-height: 1.3;
-            color: #1e293b;
-            overflow-wrap: anywhere;
-        }
-
-        .session-code {
-            font-weight: 800;
-            font-size: 13px;
-            color: #1e293b;
-            margin-bottom: 2px;
-        }
-
-        .session-code sup {
-            font-size: 12px;
-            font-weight: 900;
-            color: #1e293b;
-        }
-
         .session-sub-name {
             font-size: 11px;
             font-weight: 600;
@@ -376,75 +354,6 @@
             font-size: 10px;
             font-style: italic;
             color: #1e293b;
-        }
-
-        /* Batch-wise layout inside practical cell */
-        .batch-grid-cell {
-            display: flex;
-            flex-direction: column;
-            gap: 3px;
-            text-align: left;
-            padding: 2px 4px;
-            font-size: 11px;
-        }
-
-        .batch-entry-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            border-bottom: 1px dotted #888888;
-            padding-bottom: 2px;
-            line-height: 1.2;
-        }
-
-        .batch-entry-row:last-child {
-            border-bottom: none;
-            padding-bottom: 0;
-        }
-
-        .batch-tag {
-            font-weight: 800;
-            margin-right: 4px;
-            color: #1e293b;
-        }
-
-        .batch-subject {
-            font-weight: 700;
-        }
-
-        .batch-faculty {
-            font-size: 10.5px;
-            color: #1e293b;
-            margin: 0 4px;
-        }
-
-        .batch-room {
-            font-size: 10.5px;
-            font-weight: 600;
-            text-align: right;
-            white-space: nowrap;
-        }
-
-        /* Laboratory / Practical Session Vertical Batch Display */
-        .lab-cell-content {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            gap: 3px;
-            padding: 4px 2px;
-            width: 100%;
-            text-align: center;
-        }
-
-        .lab-batch-line {
-            font-size: 11.5px;
-            font-weight: 700;
-            line-height: 1.4;
-            letter-spacing: 0.3px;
-            color: #1e293b;
-            text-align: center;
-            overflow-wrap: anywhere;
         }
 
         /* Footer & Reference Table */
@@ -609,24 +518,6 @@
                 margin-top: 35px !important;
             }
 
-            .lab-cell-content {
-                display: flex !important;
-                flex-direction: column !important;
-                justify-content: center !important;
-                align-items: center !important;
-                gap: 2px !important;
-                padding: 3px 2px !important;
-                text-align: center !important;
-            }
-
-            .lab-batch-line {
-                font-size: 10pt !important;
-                font-weight: 700 !important;
-                line-height: 1.35 !important;
-                color: #1e293b !important;
-                text-align: center !important;
-                overflow-wrap: anywhere !important;
-            }
         }
     </style>
 
@@ -645,7 +536,7 @@
         <!-- Official College Header matching Image 2 -->
         <div class="official-header">
             <div class="college-name">K. D. POLYTECHNIC, PATAN</div>
-            <div class="timetable-title">Time Table (Term: {{ $timetable['term_code'] ?: ($timetable['term'] ?? $term) }})</div>
+            <div class="timetable-title">Time Table (Term Number: {{ $timetable['term_code'] ?: ($timetable['term'] ?? $term) }})</div>
             <div class="department-name">{{ $timetable['dept_full_name'] ?? $deptFullName }}</div>
         </div>
 
@@ -657,6 +548,7 @@
                 <p><strong>Academic Year :</strong> {{ $timetable['academic_year'] ?? $academicYear }}</p>
             </div>
             <div class="meta-right">
+                <p><strong>Term Number :</strong> {{ $timetable['term_code'] ?: ($timetable['term'] ?? $term) }}</p>
                 <p><strong>Term Dates :</strong> {{ $timetable['term_dates'] ?: 'Not recorded' }}</p>
                 <p><strong>w.e.f. :</strong> {{ $timetable['wef_date'] ?: 'Not recorded' }}</p>
                 <p><strong>Department :</strong> {{ $deptName }}</p>
@@ -695,174 +587,31 @@
                                     $cellSessions = $grid[$day][$slotKey] ?? collect();
                                     $rs = $rowspans[$day][$slotKey] ?? 1;
 
-                                    $isLabSlot = $cellSessions->contains(function ($s) {
-                                        $t = strtolower($s['type'] ?? '');
-                                        return str_contains($t, 'practical') || str_contains($t, 'lab');
-                                    });
-                                    $labBatchLines = [];
-                                    if ($isLabSlot) {
-                                        $batchesSeen = [];
-
-                                        foreach ($cellSessions as $s) {
-                                            $t = strtolower($s['type'] ?? '');
-                                            if ((str_contains($t, 'practical') || str_contains($t, 'lab')) && !empty($s['lab_batches'])) {
-                                                foreach ($s['lab_batches'] as $lb) {
-                                                    $bKey = $lb['batch'] ?? '';
-                                                    $line = $lb['line'] ?? implode('-', array_filter([
-                                                        $lb['batch'] ?? '',
-                                                        $lb['subject_code'] ?? '',
-                                                        $lb['faculty_initials'] ?? '',
-                                                        $lb['room'] ?? '',
-                                                    ], fn ($part) => $part !== ''));
-                                                    $lineKey = implode('|', [
-                                                        $bKey,
-                                                        $lb['subject_code'] ?? '',
-                                                        $lb['faculty_initials'] ?? '',
-                                                        $lb['room'] ?? '',
-                                                    ]);
-                                                    if (!isset($batchesSeen[$lineKey])) {
-                                                        $batchesSeen[$lineKey] = true;
-                                                        $labBatchLines[] = $line;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if (empty($labBatchLines)) {
-                                            foreach ($cellSessions as $s) {
-                                                $t = strtolower($s['type'] ?? '');
-                                                if (str_contains($t, 'practical') || str_contains($t, 'lab')) {
-                                                    $bKey = $s['batch'] ?? '';
-                                                    $rawSub = !empty($s['subject']) && strlen($s['subject']) <= 8 ? $s['subject'] : ($s['subject_code'] ?: $s['subject']);
-                                                    $bCode = strtoupper(trim(preg_replace('/\s*\(.*?\)\s*/', '', (string) $rawSub)));
-                                                    $bFac = $s['faculty_initials'] ?: '';
-                                                    $bRoom = strtoupper(trim(preg_replace('/^Lab:\s*/i', '', (string) ($s['room_number'] ?: $s['room']))));
-                                                    $lineParts = [$bKey, $bCode];
-                                                    if ($bFac !== '') {
-                                                        $lineParts[] = $bFac;
-                                                    }
-                                                    if ($bRoom !== '') {
-                                                        $lineParts[] = $bRoom;
-                                                    }
-                                                    $line = implode('-', $lineParts);
-                                                    $lineKey = implode('|', [$bKey, $bCode, $bFac, $bRoom]);
-                                                    if ($bKey !== '' && !isset($batchesSeen[$lineKey])) {
-                                                        $batchesSeen[$lineKey] = true;
-                                                        $labBatchLines[] = $line;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Sort naturally (A1, A2, A3, A4)
-                                        sort($labBatchLines);
-                                    }
                                 @endphp
 
                                 <td data-day="{{ strtolower($day) }}" data-time-slot="{{ $slotKey }}" rowspan="{{ $rs }}">
                                     @if ($cellSessions->isEmpty())
                                         <span style="color: #666;">-</span>
-                                    @elseif ($isLabSlot && !empty($labBatchLines))
-                                        <div class="lab-cell-content">
-                                            @foreach ($labBatchLines as $bLine)
-                                                <div class="lab-batch-line">{{ $bLine }}</div>
-                                            @endforeach
-                                            <div class="session-type">(LAB)</div>
-                                        </div>
-                                    @elseif ($cellSessions->every(fn ($session) => strcasecmp($session['type'] ?? '', 'Tutorial') === 0))
-                                        @php
-                                            $sortedSessions = $cellSessions->sortBy(fn ($session) => ($session['batch'] ?? '').'|'.($session['subject_code'] ?? ''));
-                                        @endphp
-                                        <div>
-                                            @foreach ($sortedSessions as $s)
-                                                @php
-                                                    $code = strtoupper($s['subject_code'] ?: $s['subject']);
-                                                    $facultyInitials = trim((string) ($s['faculty_initials'] ?? ''));
-                                                    $room = preg_replace('/^(Classroom|Lab):\s*/i', '', (string) ($s['room_number'] ?: $s['room']));
-                                                    $tutorialLine = strtoupper((string) $s['batch']).'-^'.$code;
-                                                    if ($facultyInitials !== '') {
-                                                        $tutorialLine .= '-'.$facultyInitials;
-                                                    }
-                                                    if ($room !== '') {
-                                                        $tutorialLine .= '-'.$room;
-                                                    }
-                                                @endphp
-                                                <div class="tutorial-entry-line">{{ $tutorialLine }}</div>
-                                            @endforeach
-                                            <div class="session-type">(TUTORIAL)</div>
-                                        </div>
-                                    @elseif ($cellSessions->count() === 1)
-                                        @php
-                                            $s = $cellSessions->first();
-                                            $isTut = strcasecmp($s['type'] ?? '', 'Tutorial') === 0;
-                                            $code = strtoupper($s['subject_code'] ?: $s['subject']);
-                                            $facultyInitials = trim((string) ($s['faculty_initials'] ?? ''));
-                                            $room = preg_replace('/^(Classroom|Lab):\s*/i', '', (string) ($s['room_number'] ?: $s['room']));
-                                            $sessionLine = $code.($isTut ? '^' : '');
-                                            if ($facultyInitials !== '') {
-                                                $sessionLine .= '-'.$facultyInitials;
-                                            }
-                                            if ($room !== '') {
-                                                $sessionLine .= '-'.$room;
-                                            }
-                                        @endphp
-                                        <div class="session-block">
-                                            <div class="session-code">
-                                                {{ $sessionLine }}
-                                            </div>
-                                            <div class="session-type">
-                                                ({{ strtoupper($s['type']) }}{{ !empty($s['batch']) ? ' - '.strtoupper($s['batch']) : '' }})
-                                            </div>
-                                        </div>
                                     @else
-                                        {{-- Multiple batches in same cell (e.g. Tutorials) --}}
-                                        @php
-                                            $sortedSessions = $cellSessions->sortBy(function($item) {
-                                                $b = $item['batch'] ?? '';
-                                                return $b ?: 'Z';
-                                            });
-                                        @endphp
-                                        <div class="batch-grid-cell">
-                                            @foreach ($sortedSessions as $s)
-                                                @php
-                                                    $isTut = strcasecmp($s['type'] ?? '', 'Tutorial') === 0;
-                                                    $code = $s['subject_code'] ?: $s['subject'];
-                                                    $facAbbr = $s['faculty_initials'] ?? '';
-                                                @endphp
-                                                @if ($isTut)
-                                                    @php
-                                                        $room = preg_replace('/^(Classroom|Lab):\s*/i', '', (string) ($s['room_number'] ?: $s['room']));
-                                                        $facultyInitials = trim((string) ($s['faculty_initials'] ?? ''));
-                                                        $tutorialLine = strtoupper((string) $s['batch']).'-^'.strtoupper($code);
-                                                        if ($facultyInitials !== '') {
-                                                            $tutorialLine .= '-'.$facultyInitials;
-                                                        }
-                                                        if ($room !== '') {
-                                                            $tutorialLine .= '-'.$room;
-                                                        }
-                                                    @endphp
-                                                    <div class="tutorial-entry-line">{{ $tutorialLine }}</div>
-                                                @else
-                                                <div class="batch-entry-row">
-                                                    <div>
-                                                        @if (!empty($s['batch']))
-                                                            <span class="batch-tag">{{ $s['batch'] }}:</span>
-                                                        @endif
-                                                        <span class="batch-subject">{{ $code }}</span>
-                                                        @if($facAbbr)
-                                                            <span class="batch-faculty">({{ $facAbbr }})</span>
-                                                        @endif
-                                                    </div>
-                                                    <div class="batch-room">
-                                                        {{ $s['room_number'] ?: $s['room'] }}
-                                                    </div>
-                                                </div>
-                                                @endif
-                                            @endforeach
-                                            @if ($cellSessions->contains(fn ($session) => strcasecmp($session['type'] ?? '', 'Tutorial') === 0))
-                                                <div class="session-type">(TUTORIAL)</div>
-                                            @endif
-                                        </div>
+                                        @foreach ($cellSessions as $session)
+                                            @php
+                                                $sessionType = strtolower((string) ($session['type'] ?? ''));
+                                                $sessionLabel = str_contains($sessionType, 'practical') || str_contains($sessionType, 'lab')
+                                                    ? 'PR'
+                                                    : (str_contains($sessionType, 'tutorial') ? 'TUT' : 'TH');
+                                                $sessionLocation = preg_replace(
+                                                    '/^(Classroom|Lab):\s*/i',
+                                                    '',
+                                                    (string) ($session['room_number'] ?: $session['room'])
+                                                );
+                                            @endphp
+                                            <div class="session-block">
+                                                <div class="session-sub-name">{{ $session['subject'] ?: 'Subject unavailable' }}</div>
+                                                <div class="session-faculty">{{ $session['faculty'] ?: 'Faculty unavailable' }}</div>
+                                                <div class="session-location">{{ $sessionLocation ?: 'Location unavailable' }}</div>
+                                                <div class="session-type">({{ $sessionLabel }})</div>
+                                            </div>
+                                        @endforeach
                                     @endif
                                 </td>
                             @endforeach
@@ -877,11 +626,10 @@
             <div class="info-legend">
                 <p><strong>Recess-1 :</strong> 12:30 PM – 01:00 PM</p>
                 <p><strong>Recess-2 :</strong> 03:00 PM – 03:10 PM</p>
-                <p><strong>Tutorial Legend :</strong> <code>^ = Tutorial</code></p>
+                <p><strong>Session Types :</strong> (TH) Theory, (PR) Practical, (TUT) Tutorial</p>
                 @if(!empty($sbtDates))
                     <p><strong>Skill Based Training :</strong> {{ $sbtDates }}</p>
                 @endif
-                <p><strong>Tutorial Symbol Explanation :</strong> TH (Theory Lecture), LAB / PR (Practical Lab), TUT (Tutorial)</p>
             </div>
             <div class="info-legend" style="text-align: right;">
                 <p><strong>Generated Date :</strong> {{ date('d-m-Y') }}</p>
@@ -890,52 +638,41 @@
             </div>
         </div>
 
-        <!-- Subject Reference / Summary Table (GTU College Standard) -->
+        <!-- Subject and allocation details for the selected class -->
         @if($classSubjects->isNotEmpty())
             <div class="subject-reference-wrapper">
-                <div class="subject-reference-title">Subject & Faculty Details (Class: {{ $displayClassName }})</div>
+                <div class="subject-reference-title">SUBJECT &amp; FACULTY DETAILS</div>
                 <table class="subject-summary-table">
                     <thead>
                         <tr>
-                            <th style="width: 5%;">Sr.</th>
+                            <th style="width: 5%;">Sr. No.</th>
                             <th style="width: 14%;">Subject Code</th>
-                            <th style="width: 32%;">Subject Name</th>
-                            <th style="width: 14%;">Scheme (L-T-P)</th>
-                            <th style="width: 8%;">Credits</th>
-                            <th style="width: 27%;">Allocated Faculty</th>
+                            <th style="width: 25%;">Subject Name</th>
+                            <th style="width: 22%;">Faculty Name</th>
+                            <th style="width: 15%;">Location</th>
+                            <th style="width: 11%;">Subject Type</th>
+                            <th style="width: 8%;">Duration</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach ($classSubjects as $idx => $sub)
+                        @php
+                            $detailRowNumber = 0;
+                        @endphp
+                        @foreach ($classSubjects as $sub)
                             @php
-                                $lec = (int)($sub->lecture_credit ?? 0);
-                                $tut = (int)($sub->tutorial_credit ?? 0);
-                                $lab = (int)($sub->lab_credit ?? 0);
-                                $totalCr = $sub->credit ?? ($lec + $tut + $lab);
-                                $facultyNames = $sub->allocated_faculty_names ?? [];
-                                $facName = $facultyNames ? implode(', ', $facultyNames) : '-';
-                                $abbreviations = [];
-                                foreach ($facultyNames as $facultyName) {
-                                    $clean = trim(preg_replace('/^(Prof\.|Prof|Dr\.|Dr|Mr\.|Mr|Mrs\.|Mrs|Ms\.|Ms|Er\.|Er)\s+/i', '', $facultyName));
-                                    $parts = preg_split('/[\s\.\-]+/', $clean, -1, PREG_SPLIT_NO_EMPTY);
-                                    $abbr = '';
-                                    foreach ($parts as $part) {
-                                        $abbr .= strtoupper(substr($part, 0, 1));
-                                    }
-                                    if ($abbr !== '') {
-                                        $abbreviations[] = $abbr;
-                                    }
-                                }
-                                $abbr = implode(', ', array_unique($abbreviations));
+                                $allocationDetails = $sub->allocated_details;
                             @endphp
-                            <tr>
-                                <td style="text-align: center;">{{ $idx + 1 }}</td>
-                                <td style="font-weight: 700;">{{ $sub->subject_code ?: '-' }}</td>
-                                <td>{{ $sub->name }}</td>
-                                <td style="text-align: center;">{{ $lec }} - {{ $tut }} - {{ $lab * 2 }}</td>
-                                <td style="text-align: center; font-weight: 700;">{{ $totalCr }}</td>
-                                <td>{{ $facName }} @if($abbr)<strong>({{ $abbr }})</strong>@endif</td>
-                            </tr>
+                            @foreach ($allocationDetails as $detail)
+                                <tr>
+                                    <td style="text-align: center;">{{ ++$detailRowNumber }}</td>
+                                    <td style="font-weight: 700;">{{ $sub->subject_code ?: '—' }}</td>
+                                    <td>{{ $sub->name }}</td>
+                                    <td>{{ $detail['faculty'] ?: '—' }}</td>
+                                    <td>{{ $detail['location'] ?: '—' }}</td>
+                                    <td>{{ $sub->subject_type ?: '—' }}</td>
+                                    <td style="text-align: center;">{{ (int) $sub->duration_for_class }} h/week</td>
+                                </tr>
+                            @endforeach
                         @endforeach
                     </tbody>
                 </table>
