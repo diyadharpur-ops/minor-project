@@ -575,17 +575,150 @@ Route::match(['get', 'post'], '/admin/timetable', function (Request $request) {
             }
             $facultyName = $facultyAllocation?->faculty?->name ?? $entry->faculty?->name ?? '';
 
-            $sessions[] = [
-                'day' => $entry->day,
-                'time_slot' => $entry->time_slot,
-                'subject' => $entry->subject ? $entry->subject->name : '',
-                'faculty' => $facultyName,
-                'room' => $roomName,
-                'room_number' => $roomNumber ?: $roomName,
-                'room_location' => $roomLocation,
-                'type' => $entry->lecture_type,
-                'duration' => $isPractical ? 2 : (int) ($entry->duration ?: 1),
-            ];
+            $sessionDetails = [];
+            if ($isPractical && $entry->subject) {
+                $practicalBatches = filled($entry->activity_batch)
+                    ? [$entry->activity_batch]
+                    : collect($entry->subject->division_selections ?? [])
+                        ->filter(fn (string $batch): bool => str_starts_with($batch, $division))
+                        ->sort(SORT_NATURAL)
+                        ->values()
+                        ->all();
+
+                foreach ($practicalBatches as $batch) {
+                    $pairBatches = [$batch];
+                    if (preg_match('/^(.*?)([1-9][0-9]*)$/', $batch, $matches) === 1) {
+                        $pairStart = intdiv((int) $matches[2] - 1, 2) * 2 + 1;
+                        $pairBatches = [
+                            $matches[1].$pairStart,
+                            $matches[1].($pairStart + 1),
+                        ];
+                    }
+
+                    $batchAllocation = $managedAllocations
+                        ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                            && $allocation->activity_type === 'Practical'
+                            && $allocation->activity_batch === $batch)
+                        ->sortByDesc('id')
+                        ->first(fn (RoomAllocation $allocation): bool => $allocation->faculty !== null);
+                    if (! $batchAllocation) {
+                        $batchAllocation = $managedAllocations
+                            ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                                && $allocation->activity_type === null
+                                && $allocation->allocation_type === 'Lab'
+                                && $allocation->division === $batch)
+                            ->sortByDesc('id')
+                            ->first(fn (RoomAllocation $allocation): bool => $allocation->faculty !== null);
+                    }
+
+                    $pairRoomAllocation = null;
+                    foreach ($pairBatches as $pairBatch) {
+                        $pairRoomAllocation = $managedAllocations
+                            ->filter(fn (RoomAllocation $allocation): bool => $allocation->subject_id === $entry->subject_id
+                                && $allocation->classroom_id !== null
+                                && (
+                                    ($allocation->activity_type === 'Practical'
+                                        && in_array($allocation->activity_batch, $pairBatches, true))
+                                    || ($allocation->activity_type === null
+                                        && $allocation->allocation_type === 'Lab'
+                                        && $allocation->division === $pairBatch)
+                                ))
+                            ->sortByDesc('id')
+                            ->first(fn (RoomAllocation $allocation): bool => $roomMatchesType($allocation->classroom));
+                        if ($pairRoomAllocation) {
+                            break;
+                        }
+                    }
+
+                    $batchRoom = $pairRoomAllocation?->classroom ?? $resolvedClassroom;
+                    $batchRoomNumber = trim((string) ($batchRoom?->room_number ?: $batchRoom?->room_name));
+                    $batchRoomLocation = trim((string) $batchRoom?->location);
+                    if ($batchRoomLocation !== '' && $batchRoomLocation !== $batchRoomNumber) {
+                        $batchRoomNumber = $batchRoomNumber !== ''
+                            ? $batchRoomNumber.' - '.$batchRoomLocation
+                            : $batchRoomLocation;
+                    }
+
+                    $subjectDisplay = trim((string) $entry->subject->name);
+                    if (mb_strlen($subjectDisplay) > 8) {
+                        $subjectDisplay = trim((string) ($entry->subject->subject_code ?: $subjectDisplay));
+                    }
+                    $facultyDisplay = trim((string) ($batchAllocation?->faculty?->name ?? $facultyName));
+                    $facultyDisplay = trim(preg_replace(
+                        '/^(Prof\.?|Dr\.?|Mr\.?|Mrs\.?|Ms\.?|Er\.?)\s+/i',
+                        '',
+                        $facultyDisplay
+                    ));
+                    $facultyParts = preg_split('/[\s.\-]+/', $facultyDisplay, -1, PREG_SPLIT_NO_EMPTY);
+                    $facultyInitials = collect($facultyParts ?: [])
+                        ->map(fn (string $part): string => mb_strtoupper(mb_substr($part, 0, 1)))
+                        ->implode('');
+                    $batchRoomLabel = trim((string) ($batchRoom?->room_number ?: $batchRoom?->room_name));
+                    $batchLine = implode('-', array_filter([
+                        mb_strtoupper($batch),
+                        mb_strtoupper($subjectDisplay),
+                        $facultyInitials,
+                        mb_strtoupper($batchRoomLabel),
+                    ], fn (string $part): bool => $part !== ''));
+
+                    $sessionDetails[] = [
+                        'batch' => $batch,
+                        'faculty' => $batchAllocation?->faculty?->name ?? $facultyName,
+                        'room' => $batchRoomNumber,
+                        'batch_line' => $batchLine,
+                    ];
+                }
+            }
+
+            if ($sessionDetails === []) {
+                $tutorialBatchLine = null;
+                if ($isTutorial && $entry->subject && filled($entry->activity_batch)) {
+                    $subjectDisplay = trim((string) $entry->subject->name);
+                    if (mb_strlen($subjectDisplay) > 8) {
+                        $subjectDisplay = trim((string) ($entry->subject->subject_code ?: $subjectDisplay));
+                    }
+
+                    $facultyDisplay = trim(preg_replace(
+                        '/^(Prof\.?|Dr\.?|Mr\.?|Mrs\.?|Ms\.?|Er\.?)\s+/i',
+                        '',
+                        $facultyName
+                    ));
+                    $facultyParts = preg_split('/[\s.\-]+/', $facultyDisplay, -1, PREG_SPLIT_NO_EMPTY);
+                    $facultyInitials = collect($facultyParts ?: [])
+                        ->map(fn (string $part): string => mb_strtoupper(mb_substr($part, 0, 1)))
+                        ->implode('');
+                    $tutorialRoomLabel = trim((string) ($resolvedClassroom?->room_number ?: $resolvedClassroom?->room_name));
+                    $tutorialBatchLine = implode('-', array_filter([
+                        mb_strtoupper($entry->activity_batch),
+                        '^'.mb_strtoupper($subjectDisplay),
+                        $facultyInitials,
+                        mb_strtoupper($tutorialRoomLabel),
+                    ], fn (string $part): bool => $part !== '' && $part !== '^'));
+                }
+
+                $sessionDetails[] = [
+                    'batch' => $isTutorial ? $entry->activity_batch : null,
+                    'faculty' => $facultyName,
+                    'room' => $roomNumber ?: $roomName,
+                    'batch_line' => $tutorialBatchLine,
+                ];
+            }
+
+            foreach ($sessionDetails as $detail) {
+                $sessions[] = [
+                    'day' => $entry->day,
+                    'time_slot' => $entry->time_slot,
+                    'subject' => $entry->subject ? $entry->subject->name : '',
+                    'faculty' => $detail['faculty'],
+                    'room' => $detail['room'],
+                    'room_number' => $detail['room'],
+                    'room_location' => $roomLocation,
+                    'type' => $entry->lecture_type,
+                    'batch' => $detail['batch'],
+                    'batch_line' => $detail['batch_line'] ?? null,
+                    'duration' => $isPractical ? 2 : (int) ($entry->duration ?: 1),
+                ];
+            }
         }
 
         $timetable = [

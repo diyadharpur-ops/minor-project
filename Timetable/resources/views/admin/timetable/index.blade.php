@@ -330,6 +330,18 @@
             padding: 2px 0;
         }
 
+        .session-batch {
+            font-weight: 800;
+        }
+
+        .practical-batch-line {
+            padding: 1px 0;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.25;
+            overflow-wrap: anywhere;
+        }
+
         .session-sub-name {
             font-size: 11px;
             font-weight: 600;
@@ -605,12 +617,19 @@
                                                     (string) ($session['room_number'] ?: $session['room'])
                                                 );
                                             @endphp
-                                            <div class="session-block">
-                                                <div class="session-sub-name">{{ $session['subject'] ?: 'Subject unavailable' }}</div>
-                                                <div class="session-faculty">{{ $session['faculty'] ?: 'Faculty unavailable' }}</div>
-                                                <div class="session-location">{{ $sessionLocation ?: 'Location unavailable' }}</div>
-                                                <div class="session-type">({{ $sessionLabel }})</div>
-                                            </div>
+                                            @if (!empty($session['batch_line']))
+                                                <div class="practical-batch-line">{{ $session['batch_line'] }}</div>
+                                            @else
+                                                <div class="session-block">
+                                                    @if (str_contains($sessionType, 'tutorial') && !empty($session['batch']))
+                                                        <div class="session-batch">{{ $session['batch'] }}</div>
+                                                    @endif
+                                                    <div class="session-sub-name">{{ $session['subject'] ?: 'Subject unavailable' }}</div>
+                                                    <div class="session-faculty">{{ $session['faculty'] ?: 'Faculty unavailable' }}</div>
+                                                    <div class="session-location">{{ $sessionLocation ?: 'Location unavailable' }}</div>
+                                                    <div class="session-type">({{ $sessionLabel }})</div>
+                                                </div>
+                                            @endif
                                         @endforeach
                                     @endif
                                 </td>

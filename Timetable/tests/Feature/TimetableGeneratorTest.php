@@ -145,6 +145,118 @@ it('shows the classroom and laboratory saved on timetable entries when no scoped
         ->assertDontSee('Lab unavailable');
 });
 
+it('shows practical batch faculty and shares each allocated lab between paired batches', function () {
+    $department = Department::create([
+        'name' => 'Computer Science',
+        'code' => 'CS',
+    ]);
+    $subject = Subject::create([
+        'name' => 'Database Systems',
+        'subject_code' => 'DB-501',
+        'semester' => '5',
+        'department_id' => $department->id,
+        'lab_credit' => 1,
+        'class_selections' => ['A'],
+        'division_selections' => ['A1', 'A2', 'A3', 'A4'],
+    ]);
+
+    $facultyByBatch = [];
+    foreach ([
+        'A1' => 'Prof. P J J',
+        'A2' => 'Dr. N A P',
+        'A3' => 'Mr. M R T',
+        'A4' => 'Ms. K M M',
+    ] as $batch => $facultyName) {
+        $facultyByBatch[$batch] = Faculty::create([
+            'name' => $facultyName,
+            'email' => strtolower($batch).'@example.com',
+            'department_id' => $department->id,
+        ]);
+    }
+
+    $roomByBatch = [];
+    foreach ([
+        'A1' => 'F108',
+        'A2' => 'F107',
+        'A3' => 'F007',
+        'A4' => 'F010',
+    ] as $batch => $roomNumber) {
+        $roomByBatch[$batch] = Classroom::create([
+            'room_number' => $roomNumber,
+            'room_type' => 'Lab',
+            'room_capacity' => 40,
+            'availability' => 'Available',
+        ]);
+    }
+
+    foreach (['A1', 'A2', 'A3', 'A4'] as $batch) {
+        RoomAllocation::create([
+            'department_id' => $department->id,
+            'semester' => '5',
+            'subject_id' => $subject->id,
+            'faculty_id' => $facultyByBatch[$batch]->id,
+            'class_name' => 'A',
+            'division' => 'A',
+            'activity_type' => 'Practical',
+            'activity_batch' => $batch,
+            'allocation_type' => 'Lab',
+            'status' => 'Allocated',
+        ]);
+        RoomAllocation::create([
+            'department_id' => $department->id,
+            'semester' => '5',
+            'subject_id' => $subject->id,
+            'classroom_id' => $roomByBatch[$batch]->id,
+            'class_name' => 'A',
+            'division' => $batch,
+            'allocation_type' => 'Lab',
+            'status' => 'Allocated',
+        ]);
+    }
+
+    TimetableEntry::create([
+        'department_id' => $department->id,
+        'semester' => '5',
+        'division' => 'A',
+        'academic_year' => '2026-2027',
+        'term' => 'Odd',
+        'day' => 'Monday',
+        'time_slot' => '10:30-11:30',
+        'subject_id' => $subject->id,
+        'lecture_type' => 'Practical',
+        'duration' => 2,
+    ]);
+
+    $response = $this->withSession([
+        'admin.auth' => [
+            'name' => 'Admin User',
+            'email' => 'admin@example.com',
+        ],
+    ])->get('/admin/timetable?department_id='.$department->id.'&semester=5&division=A&academic_year=2026-2027&term=Odd')
+        ->assertOk()
+        ->assertSee('A1')
+        ->assertSee('A2')
+        ->assertSee('A3')
+        ->assertSee('A4')
+        ->assertSee('A1-DB-501-PJJ-F108')
+        ->assertSee('A2-DB-501-NAP-F108')
+        ->assertSee('A3-DB-501-MRT-F007')
+        ->assertSee('A4-DB-501-KMM-F007');
+
+    preg_match(
+        '/<td data-day="monday" data-time-slot="10:30-11:30" rowspan="2">(.*?)<\/td>/s',
+        $response->getContent(),
+        $practicalCell
+    );
+
+    expect($practicalCell)->toHaveCount(2)
+        ->and($practicalCell[1])
+        ->toContain('A1-DB-501-PJJ-F108')
+        ->toContain('A2-DB-501-NAP-F108')
+        ->toContain('A3-DB-501-MRT-F007')
+        ->toContain('A4-DB-501-KMM-F007');
+});
+
 it('does not use a subject faculty unless it is present in allocation records', function () {
     $department = Department::create([
         'name' => 'Computer Science',
@@ -1143,7 +1255,7 @@ it('schedules paired tutorial groups together in their configured shared room', 
         ->assertSee('(TUT)');
 });
 
-it('renders scheduled tutorial groups in the existing session format with their allocated rooms', function () {
+it('renders scheduled tutorial batches in the reference format with allocated faculty and rooms', function () {
     $department = Department::create([
         'name' => 'Computer Science',
         'code' => 'CS',
@@ -1257,8 +1369,11 @@ it('renders scheduled tutorial groups in the existing session format with their 
         ->assertSee('Prof. P')
         ->assertSee('F111')
         ->assertSee('F108')
-        ->assertDontSee('BT1')
-        ->assertDontSee('AT1-');
+        ->assertSee('AT1-^ADDVC-YP-F111')
+        ->assertSee('AT2-^ADDVC-B-F111')
+        ->assertSee('AT3-^ADDVC-N-F108')
+        ->assertSee('AT4-^ADDVC-P-F108')
+        ->assertDontSee('BT1');
 
     $student = User::create([
         'name' => 'A Student',
@@ -1722,7 +1837,9 @@ it('renders grouped tutorials and a continuous lab block from the selected datab
         ->assertSee('Advanced Data and Virtual Computing')
         ->assertSee('L101')
         ->assertSee('(TUT)')
-        ->assertDontSee('A1-ADDVC');
+        ->assertSee('AT1-^ADDVC-YRP-F111')
+        ->assertSee('AT2-^ADDVC-JNA-F111')
+        ->assertSee('AT3-^ADDVC-JNA-F111');
 
     preg_match(
         '/<td data-day="tuesday" data-time-slot="10:30-11:30" rowspan="1">(.*?)<\/td>/s',
@@ -1737,17 +1854,11 @@ it('renders grouped tutorials and a continuous lab block from the selected datab
 
     expect($tutorialCell)->toHaveCount(2)
         ->and($tutorialCell[1])
-        ->toContain('Advanced Data and Virtual Computing')
-        ->toContain('Prof. Yash Raj Patel')
-        ->toContain('Dr. Jaya Nair Anwar')
-        ->toContain('F111')
-        ->toContain('(TUT)')
+        ->toContain('AT1-^ADDVC-YRP-F111')
+        ->toContain('AT2-^ADDVC-JNA-F111')
         ->and($laterTutorialCell)->toHaveCount(2)
         ->and($laterTutorialCell[1])
-        ->toContain('Advanced Data and Virtual Computing')
-        ->toContain('Dr. Jaya Nair Anwar')
-        ->toContain('F111')
-        ->toContain('(TUT)')
+        ->toContain('AT3-^ADDVC-JNA-F111')
         ->and(TimetableMetadata::query()
             ->where('department_id', $department->id)
             ->where('semester', '5')
@@ -1759,7 +1870,7 @@ it('renders grouped tutorials and a continuous lab block from the selected datab
         ->and($response->getContent())->toContain('Prof. Yash Raj Patel')
         ->and($response->getContent())->toContain('L101')
         ->and($response->getContent())->toContain('(PR)')
-        ->and($response->getContent())->not->toContain('A1-IIOT')
+        ->and($response->getContent())->toContain('AT1-^ADDVC-YRP-F111')
         ->and($response->getContent())->toContain('data-day="thursday" data-time-slot="10:30-11:30" rowspan="2"');
 });
 
@@ -1865,7 +1976,10 @@ it('generates all paired laboratory batches in one continuous two-hour timetable
         ->assertSee('(PR)')
         ->assertDontSee('Lab unavailable')
         ->assertDontSee('Classroom unavailable')
-        ->assertDontSee('A1-IIOT');
+        ->assertSee('A1-IIOT-PJJ-F108')
+        ->assertSee('A2-IIOT-NAP-F108')
+        ->assertSee('A3-IIOT-MRT-F102')
+        ->assertSee('A4-IIOT-KMM-F102');
 
     $day = strtolower($entries['A1']->day);
     $slot = preg_quote($entries['A1']->time_slot, '/');
@@ -1877,13 +1991,10 @@ it('generates all paired laboratory batches in one continuous two-hour timetable
 
     expect($laboratoryCell)->toHaveCount(2)
         ->and($laboratoryCell[1])
-        ->toContain('Industrial Internet of Things')
-        ->toContain('Prof. P J J')
-        ->toContain('Dr. N A P')
-        ->toContain('Mr. M R T')
-        ->toContain('Ms. K M M')
-        ->toContain('F108')
-        ->toContain('F102')
-        ->toContain('(PR)')
-        ->not->toContain('A1-IIOT');
+        ->toContain('A1-IIOT-PJJ-F108')
+        ->toContain('A2-IIOT-NAP-F108')
+        ->toContain('A3-IIOT-MRT-F102')
+        ->toContain('A4-IIOT-KMM-F102')
+        ->and(substr_count($laboratoryCell[1], 'F108'))->toBe(2)
+        ->and(substr_count($laboratoryCell[1], 'F102'))->toBe(2);
 });
